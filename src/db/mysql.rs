@@ -14,7 +14,10 @@ impl MySQLConnection {
     pub fn connect(connection_string: &str) -> Result<Box<dyn DatabaseConnection>> {
         let opts = Opts::from_url(connection_string)?;
         let pool = Pool::new(opts)?;
-        let conn = pool.get_conn()?;
+        let mut conn = pool.get_conn()?;
+
+        // Clear any database context to start with database list
+        conn.query_drop("USE information_schema")?;
 
         Ok(Box::new(MySQLConnection { 
             conn,
@@ -48,13 +51,23 @@ impl MySQLConnection {
         };
         Ok(current_db)
     }
+
+    pub fn clear_database_context(&mut self) -> Result<()> {
+        // Switch to no database to force showing database list
+        self.conn.query_drop("USE information_schema")?;
+        self.current_database = None;
+        Ok(())
+    }
 }
 
 impl DatabaseConnection for MySQLConnection {
     fn connect(path: &str) -> Result<Box<Self>> where Self: Sized {
         let opts = Opts::from_url(path)?;
         let pool = Pool::new(opts)?;
-        let conn = pool.get_conn()?;
+        let mut conn = pool.get_conn()?;
+
+        // Clear any database context to start with database list
+        conn.query_drop("USE information_schema")?;
 
         Ok(Box::new(MySQLConnection { 
             conn,
@@ -158,7 +171,7 @@ impl DatabaseConnection for MySQLConnection {
         };
         
         if let Some(db_name) = current_db {
-            if !db_name.is_empty() {
+            if !db_name.is_empty() && db_name != "information_schema" {
                 // We have a current database, show tables
                 let query = "SELECT COALESCE(TABLE_NAME, '') as table_name FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IS NOT NULL";
                 let result: Vec<Row> = self.conn.query(query)?;

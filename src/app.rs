@@ -143,6 +143,15 @@ impl App {
             return Ok(());
         }
 
+        // Handle Escape key for database browser navigation
+        if key.code == KeyCode::Esc && self.active_pane == Pane::DatabaseBrowser {
+            if self.database_browser.is_viewing_tables() {
+                // Go back to database list
+                self.go_back_to_database_list()?;
+                return Ok(());
+            }
+        }
+
         // Normal key handling when connection manager is not visible
         if let Some(vim_command) = self.vim_state.handle_key(key) {
             self.execute_vim_command(vim_command)?;
@@ -451,6 +460,30 @@ impl App {
     }
 
     fn open_database_with_save(&mut self, connection_string: &str, db_type: DatabaseType, save_to_config: bool) -> Result<()> {
+        // If a connection with the same connection string already exists in the UI,
+        // reuse it instead of adding a duplicate entry. If the UI knows about it
+        // but we haven't opened the actual connection object yet, open and insert it.
+        if let Some(existing) = self.database_browser.connections.iter().find(|c| c.connection_string == connection_string) {
+            // Select existing connection
+            let id = existing.id;
+            self.database_browser.selected_connection = Some(id);
+
+            // If connection object isn't opened yet, open and insert it
+            if !self.connections.contains_key(&id) {
+                let mut conn: Box<dyn DatabaseConnection> = match db_type {
+                    DatabaseType::SQLite => SQLiteConnection::connect(connection_string)?,
+                    DatabaseType::MySQL | DatabaseType::MariaDB => MySQLConnection::connect(connection_string)?,
+                };
+
+                // Load tables for the selected connection
+                let tables = conn.list_tables()?;
+                self.database_browser.set_tables(tables);
+                self.connections.insert(id, conn);
+            }
+
+            return Ok(());
+        }
+
         // Create connection based on database type
         let mut conn: Box<dyn DatabaseConnection> = match db_type {
             DatabaseType::SQLite => SQLiteConnection::connect(connection_string)?,
@@ -513,6 +546,32 @@ impl App {
             self.config.save()?;
         }
 
+        Ok(())
+    }
+
+    fn go_back_to_database_list(&mut self) -> Result<()> {
+        // Reset the database browser to show databases instead of tables
+        self.database_browser.go_back_to_databases();
+        
+        // For MySQL/MariaDB connections, clear database context and reload database list
+        if let Some(conn_id) = self.database_browser.selected_connection {
+            if let Some(conn) = self.connections.get_mut(&conn_id) {
+                let conn_info = self.database_browser.connections
+                    .iter()
+                    .find(|c| c.id == conn_id);
+                
+                if let Some(info) = conn_info {
+                    if matches!(info.db_type, crate::db::DatabaseType::MySQL | crate::db::DatabaseType::MariaDB) {
+                        // For MySQL, clear the database context first, then get database list
+                        if let Some(mysql_conn) = conn.as_any_mut().downcast_mut::<crate::db::mysql::MySQLConnection>() {
+                            mysql_conn.clear_database_context()?;
+                        }
+                        let tables = conn.list_tables()?;
+                        self.database_browser.set_tables(tables);
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

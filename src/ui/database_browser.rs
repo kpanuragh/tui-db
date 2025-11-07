@@ -16,6 +16,7 @@ pub struct DatabaseBrowser {
     pub list_state: ListState,
     pub focused: bool,
     pub current_database: Option<String>,
+    pub viewing_tables: bool, // true when showing tables, false when showing databases
 }
 
 impl DatabaseBrowser {
@@ -31,6 +32,7 @@ impl DatabaseBrowser {
             list_state: state,
             focused: true,
             current_database: None,
+            viewing_tables: false,
         }
     }
 
@@ -40,7 +42,12 @@ impl DatabaseBrowser {
 
     pub fn set_tables(&mut self, tables: Vec<TableInfo>) {
         let has_tables = !tables.is_empty();
+        
+        // Determine if we're viewing tables (have row counts) or databases (no row counts)
+        self.viewing_tables = has_tables && tables.iter().any(|t| t.row_count.is_some());
+        
         self.tables = tables;
+        
         if has_tables && self.selected_table.is_none() {
             self.selected_table = Some(0);
             self.list_state.select(Some(0));
@@ -53,6 +60,17 @@ impl DatabaseBrowser {
 
     pub fn get_current_database(&self) -> Option<&str> {
         self.current_database.as_deref()
+    }
+
+    pub fn is_viewing_tables(&self) -> bool {
+        self.viewing_tables
+    }
+
+    pub fn go_back_to_databases(&mut self) {
+        self.current_database = None;
+        self.viewing_tables = false;
+        // Reset selection to first item
+        self.list_state.select(Some(0));
     }
 
     pub fn move_up(&mut self) {
@@ -170,11 +188,22 @@ impl DatabaseBrowser {
             Style::default().fg(Color::DarkGray)
         };
 
+        // Create title with navigation breadcrumbs
+        let title = if self.viewing_tables && self.current_database.is_some() {
+            format!(" {} > {} (Press ESC to go back) ", 
+                self.connections.get(self.selected_connection.unwrap_or(0))
+                    .map(|c| c.name.as_str())
+                    .unwrap_or("Connection"), 
+                self.current_database.as_ref().unwrap())
+        } else {
+            " Databases ".to_string()
+        };
+
         let list = List::new(items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(" Databases ")
+                    .title(title)
                     .border_style(border_style),
             )
             .highlight_style(
