@@ -7,6 +7,7 @@ use super::connection::{DatabaseConnection, QueryResult, TableInfo};
 
 pub struct MySQLConnection {
     conn: PooledConn,
+    current_database: Option<String>,
 }
 
 impl MySQLConnection {
@@ -15,7 +16,37 @@ impl MySQLConnection {
         let pool = Pool::new(opts)?;
         let conn = pool.get_conn()?;
 
-        Ok(Box::new(MySQLConnection { conn }))
+        Ok(Box::new(MySQLConnection { 
+            conn,
+            current_database: None,
+        }))
+    }
+
+    pub fn use_database(&mut self, database_name: &str) -> Result<()> {
+        let query = format!("USE `{}`", database_name);
+        self.conn.query_drop(&query)?;
+        self.current_database = Some(database_name.to_string());
+        
+        // Verify the database was set correctly
+        let verification_result: Vec<Row> = self.conn.query("SELECT DATABASE()")?;
+        if let Some(row) = verification_result.first() {
+            let verified_db: Option<String> = row.get::<Option<String>, _>(0).unwrap_or(None);
+            if verified_db.is_none() || verified_db.as_ref().unwrap() != database_name {
+                return Err(anyhow::anyhow!("Failed to switch to database: {}", database_name));
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub fn get_current_database(&mut self) -> Result<Option<String>> {
+        let current_db_result: Vec<Row> = self.conn.query("SELECT DATABASE()")?;
+        let current_db: Option<String> = if let Some(row) = current_db_result.first() {
+            row.get::<Option<String>, _>(0).unwrap_or(None)
+        } else {
+            None
+        };
+        Ok(current_db)
     }
 }
 
@@ -25,7 +56,10 @@ impl DatabaseConnection for MySQLConnection {
         let pool = Pool::new(opts)?;
         let conn = pool.get_conn()?;
 
-        Ok(Box::new(MySQLConnection { conn }))
+        Ok(Box::new(MySQLConnection { 
+            conn,
+            current_database: None,
+        }))
     }
 
     fn execute_query(&mut self, query: &str) -> Result<QueryResult> {
@@ -63,8 +97,38 @@ impl DatabaseConnection for MySQLConnection {
                     for row in result {
                         let mut row_data = Vec::new();
                         for (idx, _col) in row.columns_ref().iter().enumerate() {
-                            let value: Option<String> = row.get(idx);
-                            row_data.push(value.unwrap_or_else(|| "NULL".to_string()));
+                            // Try to get the value safely, handling NULLs
+                            let value = match row.get_opt::<mysql::Value, _>(idx) {
+                                Some(Ok(mysql::Value::NULL)) => "NULL".to_string(),
+                                Some(Ok(val)) => {
+                                    // Convert MySQL value to string based on its type
+                                    match val {
+                                        mysql::Value::Bytes(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+                                        mysql::Value::Int(i) => i.to_string(),
+                                        mysql::Value::UInt(u) => u.to_string(),
+                                        mysql::Value::Float(f) => f.to_string(),
+                                        mysql::Value::Double(d) => d.to_string(),
+                                        mysql::Value::Date(year, month, day, hour, min, sec, micro) => {
+                                            if hour == 0 && min == 0 && sec == 0 && micro == 0 {
+                                                format!("{:04}-{:02}-{:02}", year, month, day)
+                                            } else {
+                                                format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hour, min, sec)
+                                            }
+                                        }
+                                        mysql::Value::Time(negative, days, hours, minutes, seconds, microseconds) => {
+                                            let sign = if negative { "-" } else { "" };
+                                            if days > 0 {
+                                                format!("{}{:02}:{:02}:{:02}", sign, days * 24 + hours as u32, minutes, seconds)
+                                            } else {
+                                                format!("{}{:02}:{:02}:{:02}", sign, hours, minutes, seconds)
+                                            }
+                                        }
+                                        mysql::Value::NULL => "NULL".to_string(),
+                                    }
+                                }
+                                Some(Err(_)) | None => "NULL".to_string(),
+                            };
+                            row_data.push(value);
                         }
                         rows.push(row_data);
                     }
@@ -85,25 +149,79 @@ impl DatabaseConnection for MySQLConnection {
     }
 
     fn list_tables(&mut self) -> Result<Vec<TableInfo>> {
-        let query = "SHOW TABLES";
-        let result: Vec<Row> = self.conn.query(query)?;
+        // First, try to get the current database
+        let current_db_result: Vec<Row> = self.conn.query("SELECT DATABASE()")?;
+        let current_db: Option<String> = if let Some(row) = current_db_result.first() {
+            row.get::<Option<String>, _>(0).unwrap_or(None)
+        } else {
+            None
+        };
+        
+        if let Some(db_name) = current_db {
+            if !db_name.is_empty() {
+                // We have a current database, show tables
+                let query = "SELECT COALESCE(TABLE_NAME, '') as table_name FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IS NOT NULL";
+                let result: Vec<Row> = self.conn.query(query)?;
 
-        let mut tables = Vec::new();
-        for row in result {
-            // Get the first column value (table name)
-            let table_name: String = row.get(0).unwrap_or_default();
+                let mut tables = Vec::new();
+                for row in result {
+                    // Get the table name from our safe query
+                    let table_name: String = row.get("table_name").unwrap_or_default();
+                    if table_name.is_empty() {
+                        continue; // Skip empty names
+                    }
 
-            // Get row count for each table
-            let count_query = format!("SELECT COUNT(*) FROM `{}`", table_name);
-            let count: Option<u64> = self.conn.query_first(&count_query)?;
+                    // Get row count for each table, with error handling
+                    let count_query = format!("SELECT COUNT(*) FROM `{}`", table_name);
+                    let count: Option<u64> = match self.conn.query_first(&count_query) {
+                        Ok(c) => c,
+                        Err(_) => None, // If we can't get count, just show None
+                    };
 
-            tables.push(TableInfo {
-                name: table_name,
-                row_count: count.map(|c| c as usize),
-            });
+                    tables.push(TableInfo {
+                        name: table_name,
+                        row_count: count.map(|c| c as usize),
+                    });
+                }
+                Ok(tables)
+            } else {
+                // Empty database name, show databases
+                let query = "SHOW DATABASES";
+                let result: Vec<Row> = self.conn.query(query)?;
+
+                let mut databases = Vec::new();
+                for row in result {
+                    let db_name: String = row.get(0).unwrap_or_default();
+                    if !["information_schema", "mysql", "performance_schema", "sys"].contains(&db_name.as_str()) {
+                        databases.push(TableInfo {
+                            name: db_name,
+                            row_count: None,
+                        });
+                    }
+                }
+                Ok(databases)
+            }
+        } else {
+            // No current database, show available databases
+            let query = "SELECT COALESCE(SCHEMA_NAME, '') as db_name FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IS NOT NULL";
+            let result: Vec<Row> = self.conn.query(query)?;
+
+            let mut databases = Vec::new();
+                for row in result {
+                    // Get the database name from our safe query
+                    let db_name: String = row.get("db_name").unwrap_or_default();
+                    if db_name.is_empty() {
+                        continue; // Skip empty names
+                    }                // Skip system databases for cleaner display
+                if !["information_schema", "mysql", "performance_schema", "sys"].contains(&db_name.as_str()) {
+                    databases.push(TableInfo {
+                        name: db_name,
+                        row_count: None, // Don't calculate database sizes for now
+                    });
+                }
+            }
+            Ok(databases)
         }
-
-        Ok(tables)
     }
 
     fn get_table_columns(&mut self, _table_name: &str) -> Result<Vec<super::connection::ColumnInfo>> {
@@ -112,11 +230,29 @@ impl DatabaseConnection for MySQLConnection {
     }
 
     fn get_table_data(&mut self, table_name: &str, limit: usize, offset: usize) -> Result<QueryResult> {
-        let query = format!("SELECT * FROM `{}` LIMIT {} OFFSET {}", table_name, limit, offset);
+        // Always get the current database from MySQL to ensure we have the right context
+        let current_db = self.get_current_database()?;
+        
+        let qualified_table_name = if let Some(db_name) = current_db {
+            if !db_name.is_empty() {
+                // Use fully qualified table name
+                format!("`{}`.`{}`", db_name, table_name)
+            } else {
+                return Err(anyhow::anyhow!("No database selected. Please select a database first."));
+            }
+        } else {
+            return Err(anyhow::anyhow!("No database selected. Please select a database first."));
+        };
+        
+        let query = format!("SELECT * FROM {} LIMIT {} OFFSET {}", qualified_table_name, limit, offset);
         self.execute_query(&query)
     }
 
     fn close(&mut self) -> Result<()> {
         Ok(())
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

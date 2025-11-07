@@ -127,7 +127,7 @@ impl App {
                 KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     // Test connection from form
                     if matches!(self.connection_manager.mode, ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)) {
-                        let conn_str = self.connection_manager.form.connection_string.clone();
+                        let conn_str = self.connection_manager.get_connection_string();
                         let db_type = self.connection_manager.form.db_type.clone();
                         self.test_connection(&conn_str, db_type)?;
                     }
@@ -286,6 +286,11 @@ impl App {
                         self.results_viewer.save_insert_field();
                         self.results_viewer.move_column_left();
                     }
+                } else if self.active_pane == Pane::Results {
+                    // Horizontal scrolling when not in edit mode
+                    for _ in 0..count {
+                        self.results_viewer.scroll_left();
+                    }
                 }
             }
             VimCommand::MoveRight(count) => {
@@ -300,6 +305,11 @@ impl App {
                     for _ in 0..count {
                         self.results_viewer.save_insert_field();
                         self.results_viewer.move_column_right();
+                    }
+                } else if self.active_pane == Pane::Results {
+                    // Horizontal scrolling when not in edit mode
+                    for _ in 0..count {
+                        self.results_viewer.scroll_right();
                     }
                 }
             }
@@ -433,6 +443,14 @@ impl App {
     }
 
     fn open_database(&mut self, connection_string: &str, db_type: DatabaseType) -> Result<()> {
+        self.open_database_with_save(connection_string, db_type, true)
+    }
+
+    fn open_database_no_save(&mut self, connection_string: &str, db_type: DatabaseType) -> Result<()> {
+        self.open_database_with_save(connection_string, db_type, false)
+    }
+
+    fn open_database_with_save(&mut self, connection_string: &str, db_type: DatabaseType, save_to_config: bool) -> Result<()> {
         // Create connection based on database type
         let mut conn: Box<dyn DatabaseConnection> = match db_type {
             DatabaseType::SQLite => SQLiteConnection::connect(connection_string)?,
@@ -484,14 +502,16 @@ impl App {
 
         self.connections.insert(id, conn);
 
-        // Save to config
-        let db_type_str = match db_type {
-            DatabaseType::SQLite => "sqlite".to_string(),
-            DatabaseType::MySQL => "mysql".to_string(),
-            DatabaseType::MariaDB => "mariadb".to_string(),
-        };
-        self.config.add_connection(name, connection_string.to_string(), db_type_str);
-        self.config.save()?;
+        // Save to config only if requested
+        if save_to_config {
+            let db_type_str = match db_type {
+                DatabaseType::SQLite => "sqlite".to_string(),
+                DatabaseType::MySQL => "mysql".to_string(),
+                DatabaseType::MariaDB => "mariadb".to_string(),
+            };
+            self.config.add_connection(name, connection_string.to_string(), db_type_str);
+            self.config.save()?;
+        }
 
         Ok(())
     }
@@ -535,19 +555,55 @@ impl App {
     }
 
     fn load_selected_table_data(&mut self) -> Result<()> {
-        // Get selected table
-        let table_name = match self.database_browser.get_selected_table() {
-            Some(table) => table.name.clone(),
-            None => return Ok(()), // No table selected
+        // Get selected item (could be table or database)
+        let selected_name = match self.database_browser.get_selected_table() {
+            Some(item) => item.name.clone(),
+            None => return Ok(()), // No item selected
         };
 
         // Get active connection
         if let Some(conn_id) = self.database_browser.selected_connection {
             if let Some(conn) = self.connections.get_mut(&conn_id) {
-                // Load first 1000 rows from the table
-                let result = conn.get_table_data(&table_name, 1000, 0)?;
+                // First, check if this is a MySQL connection and we might be selecting a database
+                let conn_info = self.database_browser.connections
+                    .iter()
+                    .find(|c| c.id == conn_id);
+                
+                if let Some(info) = conn_info {
+                    if matches!(info.db_type, crate::db::DatabaseType::MySQL | crate::db::DatabaseType::MariaDB) {
+                        // For MySQL connections, check if we're looking at databases or tables
+                        // If no table has row_count data, we're probably looking at databases
+                        let is_showing_databases = self.database_browser.tables.iter()
+                            .all(|t| t.row_count.is_none());
+                        
+                        if is_showing_databases {
+                            // This is a database selection, switch to it
+                            if let Some(mysql_conn) = conn.as_any_mut().downcast_mut::<crate::db::mysql::MySQLConnection>() {
+                                mysql_conn.use_database(&selected_name)?;
+                                // Store the current database in the browser
+                                self.database_browser.set_current_database(Some(selected_name.clone()));
+                                // Reload tables for the selected database
+                                let tables = conn.list_tables()?;
+                                self.database_browser.set_tables(tables);
+                                return Ok(());
+                            }
+                        } else {
+                            // This is a table selection for MySQL, ensure database context
+                            if let Some(mysql_conn) = conn.as_any_mut().downcast_mut::<crate::db::mysql::MySQLConnection>() {
+                                // Ensure we're using the correct database
+                                if let Some(db_name) = self.database_browser.get_current_database() {
+                                    mysql_conn.use_database(db_name)?;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // This is a table selection, load table data
+                let result = conn.get_table_data(&selected_name, 1000, 0)?;
+                
                 self.results_viewer.set_result(result);
-                self.results_viewer.set_table_name(table_name);
+                self.results_viewer.set_table_name(selected_name);
                 self.active_pane = Pane::Results;
                 self.update_focus();
             }
@@ -669,12 +725,29 @@ impl App {
                                     "mariadb" => DatabaseType::MariaDB,
                                     _ => DatabaseType::SQLite,
                                 };
-                                self.connection_manager.show_edit_form(
-                                    selected,
-                                    conn.name.clone(),
-                                    db_type,
-                                    conn.connection_string.clone(),
-                                );
+                                
+                                // Use detailed form if we have individual components stored
+                                if conn.username.is_some() || conn.password.is_some() || conn.host.is_some() || conn.port.is_some() || conn.database.is_some() {
+                                    self.connection_manager.show_edit_form_detailed(
+                                        selected,
+                                        conn.name.clone(),
+                                        db_type,
+                                        conn.connection_string.clone(),
+                                        conn.username.clone(),
+                                        conn.password.clone(),
+                                        conn.host.clone(),
+                                        conn.port.clone(),
+                                        conn.database.clone(),
+                                    );
+                                } else {
+                                    // Fallback to parsing connection string
+                                    self.connection_manager.show_edit_form(
+                                        selected,
+                                        conn.name.clone(),
+                                        db_type,
+                                        conn.connection_string.clone(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -726,14 +799,35 @@ impl App {
                                         "mariadb" => DatabaseType::MariaDB,
                                         _ => DatabaseType::SQLite,
                                     };
-                                    (conn.connection_string.clone(), db_type)
+                                    
+                                    // For MySQL/MariaDB, rebuild connection string if we have individual components
+                                    let connection_string = if matches!(db_type, DatabaseType::MySQL | DatabaseType::MariaDB) &&
+                                        (conn.username.is_some() || conn.host.is_some()) {
+                                        self.build_connection_string_from_config(conn, &db_type)
+                                    } else {
+                                        conn.connection_string.clone()
+                                    };
+                                    
+                                    (connection_string, db_type)
                                 })
                             };
                             if let Some((conn_str, db_type)) = connect_data {
-                                self.open_database(&conn_str, db_type)?;
+                                match self.open_database_no_save(&conn_str, db_type) {
+                                    Ok(()) => {
+                                        self.connection_manager.hide();
+                                    }
+                                    Err(e) => {
+                                        self.connection_manager.test_result = Some(format!("✗ Connection failed: {}", e));
+                                        // Don't hide the connection manager so user can see the error
+                                        return Ok(());
+                                    }
+                                }
                             }
                         }
-                        self.connection_manager.hide();
+                        // Only hide if we get here without errors
+                        if self.connection_manager.test_result.is_none() {
+                            self.connection_manager.hide();
+                        }
                     }
                     _ => {}
                 }
@@ -755,9 +849,28 @@ impl App {
             return Ok(());
         }
 
-        if self.connection_manager.form.connection_string.is_empty() {
-            self.connection_manager.test_result = Some("✗ Error: Connection string is required".to_string());
-            return Ok(());
+        // Validate based on database type
+        match self.connection_manager.form.db_type {
+            DatabaseType::SQLite => {
+                if self.connection_manager.form.connection_string.is_empty() {
+                    self.connection_manager.test_result = Some("✗ Error: File path is required".to_string());
+                    return Ok(());
+                }
+            }
+            DatabaseType::MySQL | DatabaseType::MariaDB => {
+                if self.connection_manager.form.username.is_empty() {
+                    self.connection_manager.test_result = Some("✗ Error: Username is required".to_string());
+                    return Ok(());
+                }
+                if self.connection_manager.form.host.is_empty() {
+                    self.connection_manager.test_result = Some("✗ Error: Host is required".to_string());
+                    return Ok(());
+                }
+                if self.connection_manager.form.port.is_empty() {
+                    self.connection_manager.test_result = Some("✗ Error: Port is required".to_string());
+                    return Ok(());
+                }
+            }
         }
 
         let db_type_str = match self.connection_manager.form.db_type {
@@ -766,13 +879,33 @@ impl App {
             DatabaseType::MariaDB => "mariadb".to_string(),
         };
 
+        // Get the final connection string
+        let connection_string = self.connection_manager.get_connection_string();
+
+        // Prepare optional fields for MySQL/MariaDB
+        let (username, password, host, port, database) = match self.connection_manager.form.db_type {
+            DatabaseType::SQLite => (None, None, None, None, None),
+            DatabaseType::MySQL | DatabaseType::MariaDB => (
+                if self.connection_manager.form.username.is_empty() { None } else { Some(self.connection_manager.form.username.clone()) },
+                if self.connection_manager.form.password.is_empty() { None } else { Some(self.connection_manager.form.password.clone()) },
+                if self.connection_manager.form.host.is_empty() { None } else { Some(self.connection_manager.form.host.clone()) },
+                if self.connection_manager.form.port.is_empty() { None } else { Some(self.connection_manager.form.port.clone()) },
+                if self.connection_manager.form.database.is_empty() { None } else { Some(self.connection_manager.form.database.clone()) },
+            ),
+        };
+
         match &self.connection_manager.mode {
             ConnectionManagerMode::Add => {
                 // Add new connection
-                self.config.add_connection(
+                self.config.add_connection_detailed(
                     self.connection_manager.form.name.clone(),
-                    self.connection_manager.form.connection_string.clone(),
+                    connection_string,
                     db_type_str,
+                    username,
+                    password,
+                    host,
+                    port,
+                    database,
                 );
                 self.config.save()?;
                 self.connection_manager.mode = ConnectionManagerMode::List;
@@ -787,10 +920,15 @@ impl App {
                 if let Some(name) = old_conn_name {
                     self.config.remove_connection(&name);
                 }
-                self.config.add_connection(
+                self.config.add_connection_detailed(
                     self.connection_manager.form.name.clone(),
-                    self.connection_manager.form.connection_string.clone(),
+                    connection_string,
                     db_type_str,
+                    username,
+                    password,
+                    host,
+                    port,
+                    database,
                 );
                 self.config.save()?;
                 self.connection_manager.mode = ConnectionManagerMode::List;
@@ -800,6 +938,52 @@ impl App {
         }
 
         Ok(())
+    }
+
+    fn build_connection_string_from_config(&self, conn: &crate::config::ConnectionConfig, db_type: &DatabaseType) -> String {
+        match db_type {
+            DatabaseType::SQLite => conn.connection_string.clone(),
+            DatabaseType::MySQL | DatabaseType::MariaDB => {
+                let protocol = match db_type {
+                    DatabaseType::MySQL => "mysql",
+                    DatabaseType::MariaDB => "mysql", // MariaDB uses mysql protocol
+                    _ => unreachable!(),
+                };
+                
+                let mut url = format!("{}://", protocol);
+                
+                // Add username and password if provided
+                if let Some(username) = &conn.username {
+                    url.push_str(username);
+                    if let Some(password) = &conn.password {
+                        url.push(':');
+                        url.push_str(password);
+                    }
+                    url.push('@');
+                }
+                
+                // Add host
+                let host = conn.host.as_deref().unwrap_or("localhost");
+                url.push_str(host);
+                
+                // Add port if not default
+                let port = conn.port.as_deref().unwrap_or("3306");
+                if port != "3306" {
+                    url.push(':');
+                    url.push_str(port);
+                }
+                
+                // Add database if provided
+                if let Some(database) = &conn.database {
+                    if !database.is_empty() {
+                        url.push('/');
+                        url.push_str(database);
+                    }
+                }
+                
+                url
+            }
+        }
     }
 
     fn test_connection(&mut self, connection_string: &str, db_type: DatabaseType) -> Result<()> {

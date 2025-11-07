@@ -9,6 +9,18 @@ pub struct ConnectionConfig {
     pub connection_string: String,
     #[serde(default)]
     pub db_type: String, // "sqlite", "mysql", "mariadb"
+    
+    // Optional individual connection components for MySQL/MariaDB
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -54,7 +66,32 @@ impl Config {
     pub fn add_connection(&mut self, name: String, connection_string: String, db_type: String) {
         // Check if connection already exists, don't add duplicates
         if !self.connections.iter().any(|c| c.name == name && c.connection_string == connection_string) {
-            self.connections.push(ConnectionConfig { name, connection_string, db_type });
+            self.connections.push(ConnectionConfig { 
+                name, 
+                connection_string, 
+                db_type,
+                username: None,
+                password: None,
+                host: None,
+                port: None,
+                database: None,
+            });
+        }
+    }
+
+    pub fn add_connection_detailed(&mut self, name: String, connection_string: String, db_type: String, username: Option<String>, password: Option<String>, host: Option<String>, port: Option<String>, database: Option<String>) {
+        // Check if connection already exists, don't add duplicates
+        if !self.connections.iter().any(|c| c.name == name && c.connection_string == connection_string) {
+            self.connections.push(ConnectionConfig { 
+                name, 
+                connection_string, 
+                db_type,
+                username,
+                password,
+                host,
+                port,
+                database,
+            });
         }
     }
 

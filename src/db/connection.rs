@@ -65,4 +65,5 @@ pub trait DatabaseConnection: Send {
     fn get_table_columns(&mut self, table_name: &str) -> Result<Vec<ColumnInfo>>;
     fn get_table_data(&mut self, table_name: &str, limit: usize, offset: usize) -> Result<QueryResult>;
     fn close(&mut self) -> Result<()>;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }

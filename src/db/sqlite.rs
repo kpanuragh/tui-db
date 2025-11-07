@@ -150,4 +150,8 @@ impl DatabaseConnection for SQLiteConnection {
     fn close(&mut self) -> Result<()> {
         Ok(())
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }

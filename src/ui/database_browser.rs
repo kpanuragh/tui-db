@@ -15,6 +15,7 @@ pub struct DatabaseBrowser {
     pub selected_table: Option<usize>,
     pub list_state: ListState,
     pub focused: bool,
+    pub current_database: Option<String>,
 }
 
 impl DatabaseBrowser {
@@ -29,6 +30,7 @@ impl DatabaseBrowser {
             selected_table: None,
             list_state: state,
             focused: true,
+            current_database: None,
         }
     }
 
@@ -43,6 +45,14 @@ impl DatabaseBrowser {
             self.selected_table = Some(0);
             self.list_state.select(Some(0));
         }
+    }
+
+    pub fn set_current_database(&mut self, database_name: Option<String>) {
+        self.current_database = database_name;
+    }
+
+    pub fn get_current_database(&self) -> Option<&str> {
+        self.current_database.as_deref()
     }
 
     pub fn move_up(&mut self) {

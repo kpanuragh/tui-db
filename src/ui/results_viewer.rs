@@ -11,7 +11,8 @@ use std::collections::HashMap;
 pub struct ResultsViewer {
     pub result: Option<QueryResult>,
     pub table_state: TableState,
-    pub scroll_offset: usize,
+    pub scroll_offset: usize,        // Vertical scroll offset (row)
+    pub horizontal_scroll: usize,    // Horizontal scroll offset (column)
     pub focused: bool,
     pub edit_mode: bool,
     pub insert_mode: bool,
@@ -20,6 +21,7 @@ pub struct ResultsViewer {
     pub insert_row: HashMap<usize, String>, // col_idx -> new value for insert
     pub table_name: Option<String>,
     pub edit_buffer: String,
+    pub visible_columns: usize,      // Number of columns that can fit in the display
 }
 
 impl ResultsViewer {
@@ -31,6 +33,7 @@ impl ResultsViewer {
             result: None,
             table_state: state,
             scroll_offset: 0,
+            horizontal_scroll: 0,
             focused: false,
             edit_mode: false,
             insert_mode: false,
@@ -39,12 +42,14 @@ impl ResultsViewer {
             insert_row: HashMap::new(),
             table_name: None,
             edit_buffer: String::new(),
+            visible_columns: 10, // Default to showing 10 columns
         }
     }
 
     pub fn set_result(&mut self, result: QueryResult) {
         self.result = Some(result);
         self.scroll_offset = 0;
+        self.horizontal_scroll = 0;
         self.table_state.select(Some(0));
     }
 
@@ -88,6 +93,46 @@ impl ResultsViewer {
             if !result.rows.is_empty() {
                 self.table_state.select(Some(result.rows.len() - 1));
             }
+        }
+    }
+
+    // Horizontal scrolling methods
+    pub fn scroll_left(&mut self) {
+        if self.horizontal_scroll > 0 {
+            self.horizontal_scroll -= 1;
+        }
+    }
+
+    pub fn scroll_right(&mut self) {
+        if let Some(ref result) = self.result {
+            let max_scroll = result.columns.len().saturating_sub(self.visible_columns);
+            if self.horizontal_scroll < max_scroll {
+                self.horizontal_scroll += 1;
+            }
+        }
+    }
+
+    pub fn scroll_page_left(&mut self) {
+        let scroll_amount = (self.visible_columns / 2).max(1);
+        self.horizontal_scroll = self.horizontal_scroll.saturating_sub(scroll_amount);
+    }
+
+    pub fn scroll_page_right(&mut self) {
+        if let Some(ref result) = self.result {
+            let max_scroll = result.columns.len().saturating_sub(self.visible_columns);
+            let scroll_amount = (self.visible_columns / 2).max(1);
+            self.horizontal_scroll = (self.horizontal_scroll + scroll_amount).min(max_scroll);
+        }
+    }
+
+    pub fn goto_first_column(&mut self) {
+        self.horizontal_scroll = 0;
+    }
+
+    pub fn goto_last_column(&mut self) {
+        if let Some(ref result) = self.result {
+            let max_scroll = result.columns.len().saturating_sub(self.visible_columns);
+            self.horizontal_scroll = max_scroll;
         }
     }
 
@@ -289,8 +334,18 @@ impl ResultsViewer {
         };
 
         if let Some(ref result) = self.result {
-            let header_cells = result
-                .columns
+            // Calculate how many columns can fit in the available width
+            // Assume each column needs at least 8 characters + 1 for separator
+            let available_width = area.width.saturating_sub(4); // Account for borders
+            self.visible_columns = ((available_width / 9).max(1) as usize).min(result.columns.len());
+            
+            // Determine which columns to display based on horizontal scroll
+            let start_col = self.horizontal_scroll;
+            let end_col = (start_col + self.visible_columns).min(result.columns.len());
+            
+            // Create header with visible columns only
+            let visible_columns = &result.columns[start_col..end_col];
+            let header_cells = visible_columns
                 .iter()
                 .map(|h| Cell::from(h.clone()).style(Style::default().fg(Color::Yellow)));
             let header = Row::new(header_cells)
@@ -304,7 +359,7 @@ impl ResultsViewer {
 
             // Add insert row at the top if in insert mode
             if self.insert_mode {
-                let insert_cells = result.columns.iter().enumerate().map(|(col_idx, _)| {
+                let insert_cells = (start_col..end_col).map(|col_idx| {
                     if col_idx == self.selected_column {
                         // Show edit buffer for currently editing cell
                         let mut cell = Cell::from(self.edit_buffer.clone());
@@ -326,9 +381,11 @@ impl ResultsViewer {
                 all_rows.push(insert_row);
             }
 
-            // Add existing data rows
+            // Add existing data rows with horizontal scrolling
             let data_rows = result.rows.iter().enumerate().map(|(row_idx, row)| {
-                let cells = row.iter().enumerate().map(|(col_idx, c)| {
+                let cells = (start_col..end_col).map(|col_idx| {
+                    let cell_value = row.get(col_idx).map(String::as_str).unwrap_or("");
+                    
                     // Check if this is the currently editing cell
                     if self.edit_mode && row_idx == selected_row && col_idx == self.selected_column {
                         // Show edit buffer for currently editing cell
@@ -344,7 +401,7 @@ impl ResultsViewer {
                         cell
                     } else {
                         // Show original value
-                        Cell::from(c.clone())
+                        Cell::from(cell_value)
                     }
                 });
                 Row::new(cells).height(1)
@@ -352,10 +409,10 @@ impl ResultsViewer {
 
             all_rows.extend(data_rows);
 
-            let widths = result
-                .columns
+            // Create column widths for visible columns only
+            let widths = visible_columns
                 .iter()
-                .map(|_| Constraint::Percentage((100 / result.columns.len().max(1)) as u16))
+                .map(|_| Constraint::Min(8))
                 .collect::<Vec<_>>();
 
             let mut title = format!(" Results ({} rows) ", result.rows.len());
@@ -365,6 +422,16 @@ impl ResultsViewer {
             if result.execution_time_ms > 0 {
                 title.push_str(&format!("- {}ms ", result.execution_time_ms));
             }
+            
+            // Add scroll information to title
+            if result.columns.len() > self.visible_columns {
+                title.push_str(&format!("- Cols {}-{}/{} ", 
+                    start_col + 1, 
+                    end_col, 
+                    result.columns.len()
+                ));
+            }
+            
             if self.insert_mode {
                 title.push_str("- [INSERT MODE] ");
             }
