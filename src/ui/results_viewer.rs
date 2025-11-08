@@ -2,10 +2,27 @@ use crate::db::QueryResult;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Row, Table, TableState, Paragraph, Tabs},
+    text::{Line, Span},
     Frame,
 };
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TabMode {
+    Data,
+    Schema,
+    Indexes,
+}
+
+#[derive(Debug, Clone)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub data_type: String,
+    pub nullable: String,
+    pub default_value: String,
+    pub extra: String, // For auto_increment, etc.
+}
 
 #[derive(Debug)]
 pub struct ResultsViewer {
@@ -22,12 +39,26 @@ pub struct ResultsViewer {
     pub table_name: Option<String>,
     pub edit_buffer: String,
     pub visible_columns: usize,      // Number of columns that can fit in the display
+    pub active_tab: TabMode,
+    pub schema_info: Option<String>,  // DDL/CREATE statement
+    pub indexes_info: Option<Vec<String>>, // List of indexes
+    pub schema_columns: Vec<ColumnInfo>, // Parsed column information
+    pub schema_table_state: TableState,  // Separate state for schema table
+    pub schema_edit_mode: bool,
+    pub schema_insert_mode: bool,
+    pub schema_selected_column: usize,
+    pub schema_edit_buffer: String,
+    pub schema_modified_cells: HashMap<(usize, usize), String>, // (row, col) -> new value
+    pub schema_insert_row: HashMap<usize, String>, // For new column
 }
 
 impl ResultsViewer {
     pub fn new() -> Self {
         let mut state = TableState::default();
         state.select(Some(0));
+
+        let mut schema_state = TableState::default();
+        schema_state.select(Some(0));
 
         Self {
             result: None,
@@ -43,6 +74,17 @@ impl ResultsViewer {
             table_name: None,
             edit_buffer: String::new(),
             visible_columns: 10, // Default to showing 10 columns
+            active_tab: TabMode::Data,
+            schema_info: None,
+            indexes_info: None,
+            schema_columns: Vec::new(),
+            schema_table_state: schema_state,
+            schema_edit_mode: false,
+            schema_insert_mode: false,
+            schema_selected_column: 0,
+            schema_edit_buffer: String::new(),
+            schema_modified_cells: HashMap::new(),
+            schema_insert_row: HashMap::new(),
         }
     }
 
@@ -326,7 +368,167 @@ impl ResultsViewer {
         self.insert_row.clear();
     }
 
+    pub fn discard_all_changes(&mut self) {
+        self.modified_cells.clear();
+        self.insert_row.clear();
+        self.edit_buffer.clear();
+        if self.edit_mode {
+            self.exit_edit_mode();
+        }
+        if self.insert_mode {
+            self.exit_insert_mode();
+        }
+    }
+
+    pub fn discard_schema_changes(&mut self) {
+        self.schema_modified_cells.clear();
+        self.schema_insert_row.clear();
+        self.schema_edit_buffer.clear();
+        if self.schema_edit_mode {
+            self.exit_schema_edit_mode();
+        }
+        if self.schema_insert_mode {
+            self.exit_schema_insert_mode();
+        }
+    }
+
+    pub fn has_any_changes(&self) -> bool {
+        !self.modified_cells.is_empty() || !self.insert_row.is_empty() ||
+        !self.schema_modified_cells.is_empty() || !self.schema_insert_row.is_empty()
+    }
+
+    pub fn switch_to_data_tab(&mut self) {
+        self.active_tab = TabMode::Data;
+    }
+
+    pub fn switch_to_schema_tab(&mut self) {
+        self.active_tab = TabMode::Schema;
+    }
+
+    pub fn switch_to_indexes_tab(&mut self) {
+        self.active_tab = TabMode::Indexes;
+    }
+
+    pub fn set_schema_info(&mut self, schema: String) {
+        self.schema_info = Some(schema);
+    }
+
+    pub fn set_schema_columns(&mut self, columns: Vec<ColumnInfo>) {
+        self.schema_columns = columns;
+        self.schema_table_state.select(Some(0));
+    }
+
+    pub fn set_indexes_info(&mut self, indexes: Vec<String>) {
+        self.indexes_info = Some(indexes);
+    }
+
+    pub fn enter_schema_edit_mode(&mut self) {
+        if !self.schema_columns.is_empty() {
+            self.schema_edit_mode = true;
+            let selected_row = self.schema_table_state.selected().unwrap_or(0);
+            let col_idx = self.schema_selected_column;
+            // Initialize edit buffer with current value
+            let current_value = self.get_schema_cell_value(selected_row, col_idx);
+            self.schema_edit_buffer = current_value;
+        }
+    }
+
+    pub fn exit_schema_edit_mode(&mut self) {
+        self.schema_edit_mode = false;
+        self.schema_edit_buffer.clear();
+    }
+
+    pub fn enter_schema_insert_mode(&mut self) {
+        self.schema_insert_mode = true;
+        self.schema_selected_column = 0;
+        self.schema_edit_buffer.clear();
+    }
+
+    pub fn exit_schema_insert_mode(&mut self) {
+        self.schema_insert_mode = false;
+        self.schema_insert_row.clear();
+        self.schema_edit_buffer.clear();
+    }
+
+    pub fn schema_move_column_left(&mut self) {
+        if self.schema_selected_column > 0 {
+            self.save_schema_cell_edit();
+            self.schema_selected_column -= 1;
+            let selected_row = self.schema_table_state.selected().unwrap_or(0);
+            let current_value = self.get_schema_cell_value(selected_row, self.schema_selected_column);
+            self.schema_edit_buffer = current_value;
+        }
+    }
+
+    pub fn schema_move_column_right(&mut self) {
+        if self.schema_selected_column < 4 { // 5 columns: name, type, nullable, default, extra
+            self.save_schema_cell_edit();
+            self.schema_selected_column += 1;
+            let selected_row = self.schema_table_state.selected().unwrap_or(0);
+            let current_value = self.get_schema_cell_value(selected_row, self.schema_selected_column);
+            self.schema_edit_buffer = current_value;
+        }
+    }
+
+    pub fn schema_insert_char(&mut self, c: char) {
+        self.schema_edit_buffer.push(c);
+    }
+
+    pub fn schema_backspace(&mut self) {
+        self.schema_edit_buffer.pop();
+    }
+
+    pub fn save_schema_cell_edit(&mut self) {
+        let selected_row = self.schema_table_state.selected().unwrap_or(0);
+        let col_idx = self.schema_selected_column;
+        self.schema_modified_cells.insert((selected_row, col_idx), self.schema_edit_buffer.clone());
+    }
+
+    pub fn save_schema_insert_field(&mut self) {
+        self.schema_insert_row.insert(self.schema_selected_column, self.schema_edit_buffer.clone());
+        self.schema_edit_buffer.clear();
+    }
+
+    fn get_schema_cell_value(&self, row: usize, col: usize) -> String {
+        // Check if there's a modified value first
+        if let Some(modified) = self.schema_modified_cells.get(&(row, col)) {
+            return modified.clone();
+        }
+
+        // Otherwise get from schema_columns
+        if let Some(column_info) = self.schema_columns.get(row) {
+            match col {
+                0 => column_info.name.clone(),
+                1 => column_info.data_type.clone(),
+                2 => column_info.nullable.clone(),
+                3 => column_info.default_value.clone(),
+                4 => column_info.extra.clone(),
+                _ => String::new(),
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    pub fn schema_move_up(&mut self) {
+        let selected = self.schema_table_state.selected().unwrap_or(0);
+        if selected > 0 {
+            self.schema_table_state.select(Some(selected - 1));
+        }
+    }
+
+    pub fn schema_move_down(&mut self) {
+        if !self.schema_columns.is_empty() {
+            let selected = self.schema_table_state.selected().unwrap_or(0);
+            if selected < self.schema_columns.len() - 1 {
+                self.schema_table_state.select(Some(selected + 1));
+            }
+        }
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+        use ratatui::layout::{Direction, Layout};
+
         let border_style = if self.focused {
             Style::default().fg(Color::Cyan)
         } else {
@@ -334,23 +536,68 @@ impl ResultsViewer {
         };
 
         if let Some(ref result) = self.result {
+            // Split area into tabs and content
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3), // Tabs
+                    Constraint::Min(0),    // Content
+                ])
+                .split(area);
+
+            // Render tabs
+            let tab_titles = vec!["1. Data", "2. Schema", "3. Indexes"];
+            let tabs = Tabs::new(tab_titles)
+                .block(Block::default().borders(Borders::ALL).border_style(border_style))
+                .select(match self.active_tab {
+                    TabMode::Data => 0,
+                    TabMode::Schema => 1,
+                    TabMode::Indexes => 2,
+                })
+                .style(Style::default().fg(Color::White))
+                .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+
+            frame.render_widget(tabs, chunks[0]);
+
+            // Render content based on active tab
+            match self.active_tab {
+                TabMode::Data => self.render_data_tab(frame, chunks[1], border_style),
+                TabMode::Schema => self.render_schema_tab(frame, chunks[1], border_style),
+                TabMode::Indexes => self.render_indexes_tab(frame, chunks[1], border_style),
+            }
+        } else {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Results ")
+                .border_style(border_style);
+            frame.render_widget(block, area);
+        }
+    }
+
+    fn render_data_tab(&mut self, frame: &mut Frame, area: Rect, border_style: Style) {
+        if let Some(ref result) = self.result {
             // Calculate how many columns can fit in the available width
-            // Assume each column needs at least 8 characters + 1 for separator
+            // Assume each column needs at least 15 characters (to accommodate headers)
             let available_width = area.width.saturating_sub(4); // Account for borders
-            self.visible_columns = ((available_width / 9).max(1) as usize).min(result.columns.len());
-            
+            self.visible_columns = ((available_width / 15).max(1) as usize).min(result.columns.len());
+
             // Determine which columns to display based on horizontal scroll
             let start_col = self.horizontal_scroll;
             let end_col = (start_col + self.visible_columns).min(result.columns.len());
             
-            // Create header with visible columns only
+            // Create header with visible columns only - make it more prominent
             let visible_columns = &result.columns[start_col..end_col];
             let header_cells = visible_columns
                 .iter()
-                .map(|h| Cell::from(h.clone()).style(Style::default().fg(Color::Yellow)));
+                .map(|h| Cell::from(format!(" {} ", h)).style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                ));
             let header = Row::new(header_cells)
-                .style(Style::default().bg(Color::DarkGray))
-                .height(1);
+                .height(1)
+                .bottom_margin(0);
 
             let selected_row = self.table_state.selected().unwrap_or(0);
 
@@ -362,22 +609,20 @@ impl ResultsViewer {
                 let insert_cells = (start_col..end_col).map(|col_idx| {
                     if col_idx == self.selected_column {
                         // Show edit buffer for currently editing cell
-                        let mut cell = Cell::from(self.edit_buffer.clone());
-                        cell = cell.style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-                        cell
+                        Cell::from(format!(" {} ", self.edit_buffer.clone()))
+                            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
                     } else if let Some(value) = self.insert_row.get(&col_idx) {
                         // Show entered value
-                        let mut cell = Cell::from(value.clone());
-                        cell = cell.style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC));
-                        cell
+                        Cell::from(format!(" {} ", value))
+                            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
                     } else {
                         // Show empty cell
-                        Cell::from("")
+                        Cell::from(" ")
                     }
                 });
                 let insert_row = Row::new(insert_cells)
                     .height(1)
-                    .style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+                    .style(Style::default().bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD));
                 all_rows.push(insert_row);
             }
 
@@ -385,23 +630,19 @@ impl ResultsViewer {
             let data_rows = result.rows.iter().enumerate().map(|(row_idx, row)| {
                 let cells = (start_col..end_col).map(|col_idx| {
                     let cell_value = row.get(col_idx).map(String::as_str).unwrap_or("");
-                    
+
                     // Check if this is the currently editing cell
                     if self.edit_mode && row_idx == selected_row && col_idx == self.selected_column {
-                        // Show edit buffer for currently editing cell
-                        let mut cell = Cell::from(self.edit_buffer.clone());
-                        // Highlight the editing cell
-                        cell = cell.style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-                        cell
+                        // Show edit buffer for currently editing cell with padding
+                        Cell::from(format!(" {} ", self.edit_buffer.clone()))
+                            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
                     } else if let Some(modified_value) = self.modified_cells.get(&(row_idx, col_idx)) {
-                        // Show modified value for edited cells
-                        let mut cell = Cell::from(modified_value.clone());
-                        // Mark modified cells with a different color
-                        cell = cell.style(Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC));
-                        cell
+                        // Show modified value for edited cells with padding
+                        Cell::from(format!(" {} ", modified_value))
+                            .style(Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC))
                     } else {
-                        // Show original value
-                        Cell::from(cell_value)
+                        // Show original value with padding
+                        Cell::from(format!(" {} ", cell_value))
                     }
                 });
                 Row::new(cells).height(1)
@@ -409,10 +650,22 @@ impl ResultsViewer {
 
             all_rows.extend(data_rows);
 
-            // Create column widths for visible columns only
-            let widths = visible_columns
-                .iter()
-                .map(|_| Constraint::Min(8))
+            // Create column widths for visible columns - calculate based on content
+            let widths = (start_col..end_col)
+                .map(|col_idx| {
+                    // Calculate max width needed for this column
+                    let header_width = result.columns.get(col_idx).map(|h| h.len()).unwrap_or(0);
+                    let max_content_width = result.rows.iter()
+                        .filter_map(|row| row.get(col_idx))
+                        .map(|cell| cell.len())
+                        .max()
+                        .unwrap_or(0);
+
+                    // Use the larger of header or content, with min of 10
+                    // Use Min constraint to allow columns to be flexible but ensure minimum width
+                    let width = header_width.max(max_content_width).max(10);
+                    Constraint::Min(width as u16 + 2) // +2 for padding
+                })
                 .collect::<Vec<_>>();
 
             let mut title = format!(" Results ({} rows) ", result.rows.len());
@@ -445,6 +698,12 @@ impl ResultsViewer {
                 title.push_str(&format!("- {} fields ", self.insert_row.len()));
             }
 
+            // Add help hints
+            if !self.modified_cells.is_empty() || !self.insert_row.is_empty() {
+                title.push_str("- Ctrl+D: Discard, Ctrl+S: Save ");
+            }
+            title.push_str("- R: Refresh");
+
             let table = Table::new(all_rows, widths)
                 .header(header)
                 .block(
@@ -455,17 +714,154 @@ impl ResultsViewer {
                 )
                 .highlight_style(
                     Style::default()
-                        .bg(Color::DarkGray)
+                        .bg(Color::Rgb(70, 70, 90))
+                        .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
-                );
+                )
+                .column_spacing(1);
 
             frame.render_stateful_widget(table, area, &mut self.table_state);
-        } else {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Results ")
-                .border_style(border_style);
-            frame.render_widget(block, area);
         }
     }
+
+    fn render_schema_tab(&mut self, frame: &mut Frame, area: Rect, border_style: Style) {
+        if self.schema_columns.is_empty() {
+            let paragraph = Paragraph::new("No schema information available.\nPress Enter on a table to load schema.")
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Table Schema ")
+                        .border_style(border_style),
+                )
+                .style(Style::default().fg(Color::White));
+            frame.render_widget(paragraph, area);
+            return;
+        }
+
+        // Create header
+        let header_cells = vec!["Column Name", "Data Type", "Nullable", "Default", "Extra"]
+            .into_iter()
+            .map(|h| Cell::from(format!(" {} ", h)).style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            ));
+        let header = Row::new(header_cells).height(1);
+
+        let selected_row = self.schema_table_state.selected().unwrap_or(0);
+
+        // Create rows
+        let mut all_rows: Vec<Row> = Vec::new();
+
+        // Add insert row if in insert mode
+        if self.schema_insert_mode {
+            let insert_cells = (0..5).map(|col_idx| {
+                if col_idx == self.schema_selected_column {
+                    Cell::from(format!(" {} ", self.schema_edit_buffer.clone()))
+                        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                } else if let Some(value) = self.schema_insert_row.get(&col_idx) {
+                    Cell::from(format!(" {} ", value))
+                        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
+                } else {
+                    Cell::from(" ")
+                }
+            });
+            let insert_row = Row::new(insert_cells)
+                .height(1)
+                .style(Style::default().bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD));
+            all_rows.push(insert_row);
+        }
+
+        // Add column data rows
+        let data_rows = self.schema_columns.iter().enumerate().map(|(row_idx, _)| {
+            let cells = (0..5).map(|col_idx| {
+                let cell_value = self.get_schema_cell_value(row_idx, col_idx);
+
+                if self.schema_edit_mode && row_idx == selected_row && col_idx == self.schema_selected_column {
+                    Cell::from(format!(" {} ", self.schema_edit_buffer.clone()))
+                        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                } else if self.schema_modified_cells.contains_key(&(row_idx, col_idx)) {
+                    Cell::from(format!(" {} ", cell_value))
+                        .style(Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC))
+                } else {
+                    Cell::from(format!(" {} ", cell_value))
+                }
+            });
+            Row::new(cells).height(1)
+        });
+
+        all_rows.extend(data_rows);
+
+        // Column widths
+        let widths = vec![
+            Constraint::Min(20), // Column Name
+            Constraint::Min(15), // Data Type
+            Constraint::Min(10), // Nullable
+            Constraint::Min(15), // Default
+            Constraint::Min(20), // Extra
+        ];
+
+        let mut title = format!(" Table Schema ({} columns) ", self.schema_columns.len());
+        if self.schema_insert_mode {
+            title.push_str("- [INSERT MODE] ");
+        }
+        if self.schema_edit_mode {
+            title.push_str("- [EDIT MODE] ");
+        }
+        if !self.schema_modified_cells.is_empty() {
+            title.push_str(&format!("- {} changes ", self.schema_modified_cells.len()));
+        }
+
+        // Add help hints
+        if !self.schema_modified_cells.is_empty() || !self.schema_insert_row.is_empty() {
+            title.push_str("- Ctrl+D: Discard, Ctrl+S: Save, ");
+        } else {
+            title.push_str("- e: Edit, Ctrl+N: Add column, ");
+        }
+        title.push_str("R: Refresh");
+
+        let table = Table::new(all_rows, widths)
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(title)
+                    .border_style(border_style),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Rgb(70, 70, 90))
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .column_spacing(1);
+
+        frame.render_stateful_widget(table, area, &mut self.schema_table_state);
+    }
+
+    fn render_indexes_tab(&mut self, frame: &mut Frame, area: Rect, border_style: Style) {
+        let content = if let Some(ref indexes) = self.indexes_info {
+            if indexes.is_empty() {
+                "No indexes found for this table.".to_string()
+            } else {
+                indexes.join("\n\n")
+            }
+        } else {
+            "No index information available.\nPress Enter on a table to load indexes.".to_string()
+        };
+
+        let paragraph = Paragraph::new(content)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Table Indexes ")
+                    .border_style(border_style),
+            )
+            .style(Style::default().fg(Color::White))
+            .wrap(ratatui::widgets::Wrap { trim: false });
+
+        frame.render_widget(paragraph, area);
+    }
 }
+

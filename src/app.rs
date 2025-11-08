@@ -143,11 +143,121 @@ impl App {
             return Ok(());
         }
 
+        // Handle database browser search mode
+        if self.active_pane == Pane::DatabaseBrowser && self.database_browser.search_mode {
+            match key.code {
+                KeyCode::Esc => {
+                    self.database_browser.exit_search_mode();
+                    return Ok(());
+                }
+                KeyCode::Enter => {
+                    self.database_browser.exit_search_mode();
+                    return Ok(());
+                }
+                KeyCode::Backspace => {
+                    self.database_browser.search_backspace();
+                    return Ok(());
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.database_browser.search_insert_char(c);
+                    return Ok(());
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Handle Escape key for database browser navigation
         if key.code == KeyCode::Esc && self.active_pane == Pane::DatabaseBrowser {
+            // Clear search first if active
+            if !self.database_browser.search_query.is_empty() {
+                self.database_browser.clear_search();
+                return Ok(());
+            }
+            // Then handle going back to database list
             if self.database_browser.is_viewing_tables() {
                 // Go back to database list
                 self.go_back_to_database_list()?;
+                return Ok(());
+            }
+        }
+
+        // Handle tab switching in Results pane (1, 2, 3 keys)
+        if self.active_pane == Pane::Results && !self.results_viewer.edit_mode && !self.results_viewer.insert_mode && !self.results_viewer.schema_edit_mode && !self.results_viewer.schema_insert_mode {
+            match key.code {
+                KeyCode::Char('1') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.results_viewer.switch_to_data_tab();
+                    return Ok(());
+                }
+                KeyCode::Char('2') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.results_viewer.switch_to_schema_tab();
+                    return Ok(());
+                }
+                KeyCode::Char('3') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.results_viewer.switch_to_indexes_tab();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
+        // Handle Ctrl+D for discard changes
+        if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if self.active_pane == Pane::Results && self.results_viewer.has_any_changes() {
+                if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                    self.results_viewer.discard_schema_changes();
+                } else {
+                    self.results_viewer.discard_all_changes();
+                }
+                self.vim_state.enter_normal_mode();
+                return Ok(());
+            }
+        }
+
+        // Handle schema tab edit/insert mode key input
+        if self.active_pane == Pane::Results && self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+            if self.results_viewer.schema_edit_mode || self.results_viewer.schema_insert_mode {
+                match key.code {
+                    KeyCode::Esc => {
+                        if self.results_viewer.schema_edit_mode {
+                            self.results_viewer.exit_schema_edit_mode();
+                        } else {
+                            self.results_viewer.exit_schema_insert_mode();
+                        }
+                        return Ok(());
+                    }
+                    KeyCode::Left | KeyCode::Char('h') => {
+                        self.results_viewer.schema_move_column_left();
+                        return Ok(());
+                    }
+                    KeyCode::Right | KeyCode::Char('l') => {
+                        self.results_viewer.schema_move_column_right();
+                        return Ok(());
+                    }
+                    KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        match c {
+                            's' => {
+                                // Save schema changes
+                                if self.results_viewer.schema_insert_mode {
+                                    self.save_schema_insert_column()?;
+                                } else {
+                                    self.save_schema_edits()?;
+                                }
+                                return Ok(());
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.results_viewer.schema_insert_char(c);
+                        return Ok(());
+                    }
+                    KeyCode::Backspace => {
+                        self.results_viewer.schema_backspace();
+                        return Ok(());
+                    }
+                    _ => {}
+                }
                 return Ok(());
             }
         }
@@ -206,8 +316,13 @@ impl App {
             }
             VimCommand::EnterInsertRowMode => {
                 if self.active_pane == Pane::Results {
-                    self.results_viewer.enter_insert_mode();
-                    self.vim_state.enter_insert_mode();
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                        self.results_viewer.enter_schema_insert_mode();
+                        self.vim_state.enter_insert_mode();
+                    } else {
+                        self.results_viewer.enter_insert_mode();
+                        self.vim_state.enter_insert_mode();
+                    }
                 }
             }
             VimCommand::SaveInsertRow => {
@@ -217,14 +332,24 @@ impl App {
             }
             VimCommand::EnterEditMode => {
                 if self.active_pane == Pane::Results {
-                    self.results_viewer.enter_edit_mode();
-                    self.vim_state.enter_insert_mode();
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                        self.results_viewer.enter_schema_edit_mode();
+                        self.vim_state.enter_insert_mode();
+                    } else {
+                        self.results_viewer.enter_edit_mode();
+                        self.vim_state.enter_insert_mode();
+                    }
                 }
             }
             VimCommand::ExitEditMode => {
-                if self.active_pane == Pane::Results && self.results_viewer.edit_mode {
-                    self.results_viewer.exit_edit_mode();
-                    self.vim_state.enter_normal_mode();
+                if self.active_pane == Pane::Results {
+                    if self.results_viewer.schema_edit_mode {
+                        self.results_viewer.exit_schema_edit_mode();
+                        self.vim_state.enter_normal_mode();
+                    } else if self.results_viewer.edit_mode {
+                        self.results_viewer.exit_edit_mode();
+                        self.vim_state.enter_normal_mode();
+                    }
                 }
             }
             VimCommand::MoveColumnLeft => {
@@ -266,7 +391,13 @@ impl App {
                     self.query_editor.move_up(count);
                 }
                 Pane::Results => {
-                    self.results_viewer.move_up(count);
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                        for _ in 0..count {
+                            self.results_viewer.schema_move_up();
+                        }
+                    } else {
+                        self.results_viewer.move_up(count);
+                    }
                 }
             },
             VimCommand::MoveDown(count) => match self.active_pane {
@@ -279,7 +410,13 @@ impl App {
                     self.query_editor.move_down(count);
                 }
                 Pane::Results => {
-                    self.results_viewer.move_down(count);
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                        for _ in 0..count {
+                            self.results_viewer.schema_move_down();
+                        }
+                    } else {
+                        self.results_viewer.move_down(count);
+                    }
                 }
             },
             VimCommand::MoveLeft(count) => {
@@ -396,6 +533,34 @@ impl App {
             }
             VimCommand::ConnectionManagerAction(action) => {
                 self.handle_connection_manager_action(action)?;
+            }
+            VimCommand::StartSearch => {
+                if self.active_pane == Pane::DatabaseBrowser {
+                    self.database_browser.enter_search_mode();
+                }
+            }
+            VimCommand::DiscardChanges => {
+                if self.active_pane == Pane::Results {
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                        self.results_viewer.discard_schema_changes();
+                    } else {
+                        self.results_viewer.discard_all_changes();
+                    }
+                    self.vim_state.enter_normal_mode();
+                }
+            }
+            VimCommand::RefreshData => {
+                if self.active_pane == Pane::Results {
+                    self.refresh_current_table()?;
+                } else if self.active_pane == Pane::DatabaseBrowser {
+                    // Refresh database/table list
+                    if let Some(conn_id) = self.database_browser.selected_connection {
+                        if let Some(conn) = self.connections.get_mut(&conn_id) {
+                            let tables = conn.list_tables()?;
+                            self.database_browser.set_tables(tables);
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -660,9 +825,22 @@ impl App {
                 
                 // This is a table selection, load table data
                 let result = conn.get_table_data(&selected_name, 1000, 0)?;
-                
+
                 self.results_viewer.set_result(result);
-                self.results_viewer.set_table_name(selected_name);
+                self.results_viewer.set_table_name(selected_name.clone());
+
+                // Load schema information (DDL)
+                let schema = Self::get_table_schema(conn, &selected_name)?;
+                self.results_viewer.set_schema_info(schema);
+
+                // Load column information for schema table
+                let columns = Self::get_column_info(conn, &selected_name)?;
+                self.results_viewer.set_schema_columns(columns);
+
+                // Load index information
+                let indexes = Self::get_table_indexes(conn, &selected_name)?;
+                self.results_viewer.set_indexes_info(indexes);
+
                 self.active_pane = Pane::Results;
                 self.update_focus();
             }
@@ -1112,5 +1290,330 @@ impl App {
         self.database_browser.focused = self.active_pane == Pane::DatabaseBrowser;
         self.query_editor.focused = self.active_pane == Pane::QueryEditor;
         self.results_viewer.focused = self.active_pane == Pane::Results;
+    }
+
+    fn get_column_info(conn: &mut Box<dyn DatabaseConnection>, table_name: &str) -> Result<Vec<crate::ui::results_viewer::ColumnInfo>> {
+        use crate::ui::results_viewer::ColumnInfo;
+        let mut columns = Vec::new();
+
+        // Try SQLite PRAGMA first
+        let pragma_query = format!("PRAGMA table_info({})", table_name);
+        match conn.execute_query(&pragma_query) {
+            Ok(result) => {
+                // SQLite PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+                for row in &result.rows {
+                    if row.len() >= 6 {
+                        let name = row[1].clone();
+                        let data_type = row[2].clone();
+                        let not_null = &row[3];
+                        let default_value = row[4].clone();
+                        let is_pk = &row[5];
+
+                        let nullable = if not_null == "0" { "YES" } else { "NO" };
+                        let extra = if is_pk != "0" { "PRIMARY KEY" } else { "" };
+
+                        columns.push(ColumnInfo {
+                            name,
+                            data_type,
+                            nullable: nullable.to_string(),
+                            default_value,
+                            extra: extra.to_string(),
+                        });
+                    }
+                }
+                return Ok(columns);
+            }
+            Err(_) => {
+                // Try MySQL/MariaDB DESCRIBE
+                let describe_query = format!("DESCRIBE {}", table_name);
+                match conn.execute_query(&describe_query) {
+                    Ok(result) => {
+                        // DESCRIBE returns: Field, Type, Null, Key, Default, Extra
+                        for row in &result.rows {
+                            if row.len() >= 6 {
+                                let name = row[0].clone();
+                                let data_type = row[1].clone();
+                                let nullable = row[2].clone();
+                                let key = &row[3];
+                                let default_value = row[4].clone();
+                                let extra_val = row[5].clone();
+
+                                let mut extra = extra_val.clone();
+                                if key == "PRI" {
+                                    extra = if extra.is_empty() {
+                                        "PRIMARY KEY".to_string()
+                                    } else {
+                                        format!("PRIMARY KEY, {}", extra)
+                                    };
+                                }
+
+                                columns.push(ColumnInfo {
+                                    name,
+                                    data_type,
+                                    nullable,
+                                    default_value,
+                                    extra,
+                                });
+                            }
+                        }
+                        return Ok(columns);
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        Ok(columns)
+    }
+
+    fn get_table_schema(conn: &mut Box<dyn DatabaseConnection>, table_name: &str) -> Result<String> {
+        // Try to get CREATE TABLE statement
+        let query = format!("SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'", table_name);
+
+        match conn.execute_query(&query) {
+            Ok(result) => {
+                if !result.rows.is_empty() && !result.rows[0].is_empty() {
+                    Ok(result.rows[0][0].clone())
+                } else {
+                    // Fallback: describe table structure manually
+                    let pragma_query = format!("PRAGMA table_info({})", table_name);
+                    match conn.execute_query(&pragma_query) {
+                        Ok(info_result) => {
+                            let mut schema = format!("CREATE TABLE {} (\n", table_name);
+                            for (i, row) in info_result.rows.iter().enumerate() {
+                                if row.len() >= 3 {
+                                    let col_name = &row[1];
+                                    let col_type = &row[2];
+                                    schema.push_str(&format!("  {} {}", col_name, col_type));
+                                    if i < info_result.rows.len() - 1 {
+                                        schema.push_str(",\n");
+                                    } else {
+                                        schema.push_str("\n");
+                                    }
+                                }
+                            }
+                            schema.push_str(");");
+                            Ok(schema)
+                        }
+                        Err(_) => Ok(format!("Table: {}\n\nSchema information not available", table_name)),
+                    }
+                }
+            }
+            Err(_) => {
+                // For MySQL/MariaDB
+                let show_create = format!("SHOW CREATE TABLE {}", table_name);
+                match conn.execute_query(&show_create) {
+                    Ok(result) => {
+                        if !result.rows.is_empty() && result.rows[0].len() >= 2 {
+                            Ok(result.rows[0][1].clone())
+                        } else {
+                            Ok(format!("Table: {}\n\nSchema information not available", table_name))
+                        }
+                    }
+                    Err(_) => Ok(format!("Table: {}\n\nSchema information not available", table_name)),
+                }
+            }
+        }
+    }
+
+    fn get_table_indexes(conn: &mut Box<dyn DatabaseConnection>, table_name: &str) -> Result<Vec<String>> {
+        let mut indexes = Vec::new();
+
+        // Try SQLite first
+        let query = format!("PRAGMA index_list({})", table_name);
+        match conn.execute_query(&query) {
+            Ok(result) => {
+                for row in &result.rows {
+                    if !row.is_empty() {
+                        let index_name = &row[1];
+                        // Get index details
+                        let detail_query = format!("PRAGMA index_info({})", index_name);
+                        if let Ok(detail_result) = conn.execute_query(&detail_query) {
+                            let mut columns = Vec::new();
+                            for detail_row in &detail_result.rows {
+                                if detail_row.len() >= 3 {
+                                    columns.push(detail_row[2].clone());
+                                }
+                            }
+                            indexes.push(format!("Index: {}\nColumns: {}", index_name, columns.join(", ")));
+                        }
+                    }
+                }
+                return Ok(indexes);
+            }
+            Err(_) => {
+                // Try MySQL/MariaDB
+                let show_indexes = format!("SHOW INDEX FROM {}", table_name);
+                match conn.execute_query(&show_indexes) {
+                    Ok(result) => {
+                        let mut index_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+                        for row in &result.rows {
+                            if row.len() >= 5 {
+                                let index_name = &row[2];
+                                let column_name = &row[4];
+                                index_map.entry(index_name.clone()).or_insert_with(Vec::new).push(column_name.clone());
+                            }
+                        }
+                        for (index_name, columns) in index_map {
+                            indexes.push(format!("Index: {}\nColumns: {}", index_name, columns.join(", ")));
+                        }
+                        return Ok(indexes);
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+
+        Ok(indexes)
+    }
+
+    fn save_schema_edits(&mut self) -> Result<()> {
+        // Generate ALTER TABLE statements for modified columns
+        let table_name = match &self.results_viewer.table_name {
+            Some(name) => name.clone(),
+            None => return Ok(()),
+        };
+
+        if self.results_viewer.schema_modified_cells.is_empty() {
+            return Ok(());
+        }
+
+        // Get active connection
+        if let Some(conn_id) = self.database_browser.selected_connection {
+            if let Some(conn) = self.connections.get_mut(&conn_id) {
+                // Group modifications by row (column)
+                let mut column_changes: std::collections::HashMap<usize, Vec<(usize, String)>> = std::collections::HashMap::new();
+                for ((row, col), value) in &self.results_viewer.schema_modified_cells {
+                    column_changes.entry(*row).or_insert_with(Vec::new).push((*col, value.clone()));
+                }
+
+                for (row_idx, changes) in column_changes {
+                    if let Some(column_info) = self.results_viewer.schema_columns.get(row_idx) {
+                        let mut new_name = column_info.name.clone();
+                        let mut new_type = column_info.data_type.clone();
+
+                        // Apply changes
+                        for (col_idx, value) in changes {
+                            match col_idx {
+                                0 => new_name = value,
+                                1 => new_type = value,
+                                _ => {} // Other fields not supported for ALTER yet
+                            }
+                        }
+
+                        // Generate ALTER TABLE statement
+                        let alter_query = format!(
+                            "ALTER TABLE {} CHANGE COLUMN {} {} {}",
+                            table_name,
+                            column_info.name,
+                            new_name,
+                            new_type
+                        );
+
+                        conn.execute_query(&alter_query)?;
+                    }
+                }
+
+                // Clear modifications after successful save
+                self.results_viewer.schema_modified_cells.clear();
+                self.results_viewer.exit_schema_edit_mode();
+
+                // Reload schema
+                let schema = Self::get_table_schema(conn, &table_name)?;
+                self.results_viewer.set_schema_info(schema);
+                let columns = Self::get_column_info(conn, &table_name)?;
+                self.results_viewer.set_schema_columns(columns);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn save_schema_insert_column(&mut self) -> Result<()> {
+        // Generate ALTER TABLE ADD COLUMN statement
+        let table_name = match &self.results_viewer.table_name {
+            Some(name) => name.clone(),
+            None => return Ok(()),
+        };
+
+        // Save current field first
+        self.results_viewer.save_schema_insert_field();
+
+        let column_name = self.results_viewer.schema_insert_row.get(&0).cloned().unwrap_or_default();
+        let data_type = self.results_viewer.schema_insert_row.get(&1).cloned().unwrap_or_default();
+
+        if column_name.is_empty() || data_type.is_empty() {
+            return Ok(()); // Need at least name and type
+        }
+
+        // Get active connection
+        if let Some(conn_id) = self.database_browser.selected_connection {
+            if let Some(conn) = self.connections.get_mut(&conn_id) {
+                // Build ALTER TABLE ADD COLUMN statement
+                let mut alter_query = format!("ALTER TABLE {} ADD COLUMN {} {}", table_name, column_name, data_type);
+
+                // Add nullable constraint if specified
+                if let Some(nullable) = self.results_viewer.schema_insert_row.get(&2) {
+                    if nullable.to_uppercase() == "NO" || nullable.to_uppercase() == "NOT NULL" {
+                        alter_query.push_str(" NOT NULL");
+                    }
+                }
+
+                // Add default value if specified
+                if let Some(default_val) = self.results_viewer.schema_insert_row.get(&3) {
+                    if !default_val.is_empty() {
+                        alter_query.push_str(&format!(" DEFAULT {}", default_val));
+                    }
+                }
+
+                conn.execute_query(&alter_query)?;
+
+                // Clear insert row
+                self.results_viewer.exit_schema_insert_mode();
+
+                // Reload schema
+                let schema = Self::get_table_schema(conn, &table_name)?;
+                self.results_viewer.set_schema_info(schema);
+                let columns = Self::get_column_info(conn, &table_name)?;
+                self.results_viewer.set_schema_columns(columns);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn refresh_current_table(&mut self) -> Result<()> {
+        // Get the current table name
+        let table_name = match &self.results_viewer.table_name {
+            Some(name) => name.clone(),
+            None => return Ok(()), // No table loaded
+        };
+
+        // Get active connection
+        if let Some(conn_id) = self.database_browser.selected_connection {
+            if let Some(conn) = self.connections.get_mut(&conn_id) {
+                // Reload table data
+                let result = conn.get_table_data(&table_name, 1000, 0)?;
+                self.results_viewer.set_result(result);
+
+                // Reload schema information
+                let schema = Self::get_table_schema(conn, &table_name)?;
+                self.results_viewer.set_schema_info(schema);
+
+                // Reload column information for schema table
+                let columns = Self::get_column_info(conn, &table_name)?;
+                self.results_viewer.set_schema_columns(columns);
+
+                // Reload index information
+                let indexes = Self::get_table_indexes(conn, &table_name)?;
+                self.results_viewer.set_indexes_info(indexes);
+
+                // Clear any pending changes
+                self.results_viewer.discard_all_changes();
+                self.results_viewer.discard_schema_changes();
+            }
+        }
+
+        Ok(())
     }
 }

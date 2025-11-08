@@ -17,6 +17,8 @@ pub struct DatabaseBrowser {
     pub focused: bool,
     pub current_database: Option<String>,
     pub viewing_tables: bool, // true when showing tables, false when showing databases
+    pub search_mode: bool,
+    pub search_query: String,
 }
 
 impl DatabaseBrowser {
@@ -33,6 +35,8 @@ impl DatabaseBrowser {
             focused: true,
             current_database: None,
             viewing_tables: false,
+            search_mode: false,
+            search_query: String::new(),
         }
     }
 
@@ -74,7 +78,7 @@ impl DatabaseBrowser {
     }
 
     pub fn move_up(&mut self) {
-        let total_items = self.connections.len() + self.tables.len();
+        let total_items = self.get_total_filtered_items();
         if total_items == 0 {
             return;
         }
@@ -86,11 +90,11 @@ impl DatabaseBrowser {
             current - 1
         };
         self.list_state.select(Some(next));
-        self.update_selection(next);
+        self.update_selection_filtered(next);
     }
 
     pub fn move_down(&mut self) {
-        let total_items = self.connections.len() + self.tables.len();
+        let total_items = self.get_total_filtered_items();
         if total_items == 0 {
             return;
         }
@@ -102,7 +106,7 @@ impl DatabaseBrowser {
             current + 1
         };
         self.list_state.select(Some(next));
-        self.update_selection(next);
+        self.update_selection_filtered(next);
     }
 
     fn update_selection(&mut self, index: usize) {
@@ -113,6 +117,29 @@ impl DatabaseBrowser {
             let table_idx = index - self.connections.len();
             if table_idx < self.tables.len() {
                 self.selected_table = Some(table_idx);
+            }
+        }
+    }
+
+    fn update_selection_filtered(&mut self, filtered_index: usize) {
+        let (filtered_conns, filtered_tables) = self.get_filtered_items();
+
+        // Handle empty filtered results
+        if filtered_conns.is_empty() && filtered_tables.is_empty() {
+            return;
+        }
+
+        if filtered_index < filtered_conns.len() {
+            // Selecting a connection
+            let actual_conn_idx = filtered_conns[filtered_index];
+            self.selected_connection = Some(actual_conn_idx);
+            self.selected_table = None;
+        } else if self.selected_connection.is_some() {
+            // Selecting a table
+            let table_offset = filtered_index - filtered_conns.len();
+            if table_offset < filtered_tables.len() {
+                let actual_table_idx = filtered_tables[table_offset];
+                self.selected_table = Some(actual_table_idx);
             }
         }
     }
@@ -151,11 +178,84 @@ impl DatabaseBrowser {
         Some(removed)
     }
 
+    pub fn enter_search_mode(&mut self) {
+        self.search_mode = true;
+        self.search_query.clear();
+        // Reset selection to first item
+        self.list_state.select(Some(0));
+    }
+
+    pub fn exit_search_mode(&mut self) {
+        self.search_mode = false;
+        // Keep search query active for filtering, just exit input mode
+    }
+
+    pub fn search_insert_char(&mut self, c: char) {
+        self.search_query.push(c);
+        // Reset selection to first filtered item when search changes
+        self.list_state.select(Some(0));
+        self.update_selection_filtered(0);
+    }
+
+    pub fn search_backspace(&mut self) {
+        self.search_query.pop();
+        // Reset selection to first filtered item when search changes
+        self.list_state.select(Some(0));
+        self.update_selection_filtered(0);
+    }
+
+    pub fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.search_mode = false;
+        // Reset selection when clearing search
+        self.list_state.select(Some(0));
+        if !self.connections.is_empty() {
+            self.update_selection(0);
+        }
+    }
+
+    fn get_filtered_items(&self) -> (Vec<usize>, Vec<usize>) {
+        let search_lower = self.search_query.to_lowercase();
+
+        // Get filtered connection indices
+        let filtered_connections: Vec<usize> = if self.search_query.is_empty() {
+            (0..self.connections.len()).collect()
+        } else {
+            self.connections.iter().enumerate()
+                .filter(|(_, conn)| conn.name.to_lowercase().contains(&search_lower))
+                .map(|(idx, _)| idx)
+                .collect()
+        };
+
+        // Get filtered table indices
+        let filtered_tables: Vec<usize> = if self.search_query.is_empty() {
+            (0..self.tables.len()).collect()
+        } else {
+            self.tables.iter().enumerate()
+                .filter(|(_, table)| table.name.to_lowercase().contains(&search_lower))
+                .map(|(idx, _)| idx)
+                .collect()
+        };
+
+        (filtered_connections, filtered_tables)
+    }
+
+    fn get_total_filtered_items(&self) -> usize {
+        let (conns, tables) = self.get_filtered_items();
+        conns.len() + if self.selected_connection.is_some() { tables.len() } else { 0 }
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let mut items = Vec::new();
+        let search_lower = self.search_query.to_lowercase();
 
         // Add connections
         for (idx, conn) in self.connections.iter().enumerate() {
+            // Filter by search query if searching
+            if !self.search_query.is_empty() && !conn.name.to_lowercase().contains(&search_lower) {
+                continue;
+            }
+
             let icon = if Some(idx) == self.selected_connection {
                 "▼ "
             } else {
@@ -170,6 +270,11 @@ impl DatabaseBrowser {
         // Add tables if a connection is selected
         if self.selected_connection.is_some() {
             for table in &self.tables {
+                // Filter by search query if searching
+                if !self.search_query.is_empty() && !table.name.to_lowercase().contains(&search_lower) {
+                    continue;
+                }
+
                 let count_str = table
                     .row_count
                     .map(|c| format!(" ({})", c))
@@ -188,15 +293,22 @@ impl DatabaseBrowser {
             Style::default().fg(Color::DarkGray)
         };
 
-        // Create title with navigation breadcrumbs
-        let title = if self.viewing_tables && self.current_database.is_some() {
-            format!(" {} > {} (Press ESC to go back) ", 
+        // Create title with navigation breadcrumbs and search indicator
+        let title = if self.search_mode {
+            let filtered_count = self.get_total_filtered_items();
+            format!(" Search: {} ({} matches) ", self.search_query, filtered_count)
+        } else if !self.search_query.is_empty() {
+            let filtered_count = self.get_total_filtered_items();
+            format!(" Databases (Filtered: {} - {} matches) - Press / to search, ESC to clear ",
+                self.search_query, filtered_count)
+        } else if self.viewing_tables && self.current_database.is_some() {
+            format!(" {} > {} (Press ESC to go back, / to search) ",
                 self.connections.get(self.selected_connection.unwrap_or(0))
                     .map(|c| c.name.as_str())
-                    .unwrap_or("Connection"), 
+                    .unwrap_or("Connection"),
                 self.current_database.as_ref().unwrap())
         } else {
-            " Databases ".to_string()
+            " Databases (Press / to search) ".to_string()
         };
 
         let list = List::new(items)

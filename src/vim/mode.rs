@@ -166,6 +166,7 @@ impl VimState {
             KeyCode::Char('p') => Some(VimCommand::Paste),
             KeyCode::Char('u') => Some(VimCommand::Undo),
             KeyCode::Char('r') => Some(VimCommand::Redo),
+            KeyCode::Char('R') => Some(VimCommand::RefreshData),
             KeyCode::Char('g') if matches!(self.command_buffer.chars().last(), Some('g')) => {
                 self.command_buffer.clear();
                 Some(VimCommand::GotoTop)
@@ -346,6 +347,15 @@ pub enum VimCommand {
     OpenConnectionManager,
     CloseConnectionManager,
     ConnectionManagerAction(char),  // n, e, d, t, Enter
+
+    // Results Viewer Tabs
+    SwitchToDataTab,
+    SwitchToSchemaTab,
+    SwitchToIndexesTab,
+
+    // Data Management
+    DiscardChanges,
+    RefreshData,
 
     // Commands
     ExecuteCommand(String),
