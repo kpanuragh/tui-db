@@ -22,12 +22,6 @@ jobs:
             artifact_name: tui-db
             asset_name: tui-db-linux-x86_64
 
-          # Linux ARM64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact_name: tui-db
-            asset_name: tui-db-linux-aarch64
-
           # macOS x86_64 (Intel)
           - os: macos-latest
             target: x86_64-apple-darwin
@@ -55,12 +49,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -81,8 +69,6 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
       - name: Strip binary (Linux and macOS)
         if: matrix.os != 'windows-latest'
