@@ -2,6 +2,13 @@
 name = "tui-db"
 version = "0.1.0"
 edition = "2021"
+authors = ["Anuragh K P <kpanuragh@gmail.com>"]
+description = "A Terminal User Interface (TUI) database manager with Vim-like keybindings"
+license = "MIT"
+repository = "https://github.com/kpanuragh/tui-db"
+homepage = "https://github.com/kpanuragh/tui-db"
+keywords = ["tui", "database", "sqlite", "mysql", "vim"]
+categories = ["command-line-utilities", "database"]
 
 [dependencies]
 ratatui = "0.28"
@@ -14,3 +21,25 @@ serde_json = "1.0"
 dirs = "5.0"
 chrono = "0.4"
 arboard = "3.4"
+
+[package.metadata.deb]
+maintainer = "Anuragh K P <kpanuragh@gmail.com>"
+copyright = "2025, Anuragh K P <kpanuragh@gmail.com>"
+license-file = ["LICENSE", "4"]
+extended-description = """\
+TUI-DB is a Terminal User Interface database manager built with Rust. \
+It provides a DBeaver-like experience with full Vim modal editing support. \
+Supports SQLite, MySQL, and MariaDB databases."""
+depends = "$auto"
+section = "database"
+priority = "optional"
+assets = [
+    ["target/release/tui-db", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/tui-db/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/tui-db", dest = "/usr/bin/tui-db", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/tui-db/README.md", mode = "644", doc = true },
+]
