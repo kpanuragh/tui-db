@@ -9,7 +9,7 @@ pub struct ConnectionConfig {
     pub connection_string: String,
     #[serde(default)]
     pub db_type: String, // "sqlite", "mysql", "mariadb"
-    
+
     // Optional individual connection components for MySQL/MariaDB
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username: Option<String>,
@@ -50,17 +50,21 @@ impl Config {
     }
 
     fn config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
+        let config_dir =
+            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
         Ok(config_dir.join("tui-db").join("config.json"))
     }
 
     pub fn add_connection(&mut self, name: String, connection_string: String, db_type: String) {
         // Check if connection already exists, don't add duplicates
-        if !self.connections.iter().any(|c| c.name == name && c.connection_string == connection_string) {
-            self.connections.push(ConnectionConfig { 
-                name, 
-                connection_string, 
+        if !self
+            .connections
+            .iter()
+            .any(|c| c.name == name && c.connection_string == connection_string)
+        {
+            self.connections.push(ConnectionConfig {
+                name,
+                connection_string,
                 db_type,
                 username: None,
                 password: None,
@@ -72,12 +76,26 @@ impl Config {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn add_connection_detailed(&mut self, name: String, connection_string: String, db_type: String, username: Option<String>, password: Option<String>, host: Option<String>, port: Option<String>, database: Option<String>) {
+    pub fn add_connection_detailed(
+        &mut self,
+        name: String,
+        connection_string: String,
+        db_type: String,
+        username: Option<String>,
+        password: Option<String>,
+        host: Option<String>,
+        port: Option<String>,
+        database: Option<String>,
+    ) {
         // Check if connection already exists, don't add duplicates
-        if !self.connections.iter().any(|c| c.name == name && c.connection_string == connection_string) {
-            self.connections.push(ConnectionConfig { 
-                name, 
-                connection_string, 
+        if !self
+            .connections
+            .iter()
+            .any(|c| c.name == name && c.connection_string == connection_string)
+        {
+            self.connections.push(ConnectionConfig {
+                name,
+                connection_string,
                 db_type,
                 username,
                 password,

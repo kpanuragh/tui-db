@@ -2,7 +2,7 @@ use crate::db::QueryResult;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, Table, TableState, Paragraph, Tabs},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Tabs},
     Frame,
 };
 use std::collections::HashMap;
@@ -27,28 +27,28 @@ pub struct ColumnInfo {
 pub struct ResultsViewer {
     pub result: Option<QueryResult>,
     pub table_state: TableState,
-    pub scroll_offset: usize,        // Vertical scroll offset (row)
-    pub horizontal_scroll: usize,    // Horizontal scroll offset (column)
+    pub scroll_offset: usize,     // Vertical scroll offset (row)
+    pub horizontal_scroll: usize, // Horizontal scroll offset (column)
     pub focused: bool,
     pub edit_mode: bool,
     pub insert_mode: bool,
     pub selected_column: usize,
     pub modified_cells: HashMap<(usize, usize), String>, // (row, col) -> new value
-    pub insert_row: HashMap<usize, String>, // col_idx -> new value for insert
+    pub insert_row: HashMap<usize, String>,              // col_idx -> new value for insert
     pub table_name: Option<String>,
     pub edit_buffer: String,
-    pub visible_columns: usize,      // Number of columns that can fit in the display
+    pub visible_columns: usize, // Number of columns that can fit in the display
     pub active_tab: TabMode,
-    pub schema_info: Option<String>,  // DDL/CREATE statement
+    pub schema_info: Option<String>,       // DDL/CREATE statement
     pub indexes_info: Option<Vec<String>>, // List of indexes
-    pub schema_columns: Vec<ColumnInfo>, // Parsed column information
-    pub schema_table_state: TableState,  // Separate state for schema table
+    pub schema_columns: Vec<ColumnInfo>,   // Parsed column information
+    pub schema_table_state: TableState,    // Separate state for schema table
     pub schema_edit_mode: bool,
     pub schema_insert_mode: bool,
     pub schema_selected_column: usize,
     pub schema_edit_buffer: String,
     pub schema_modified_cells: HashMap<(usize, usize), String>, // (row, col) -> new value
-    pub schema_insert_row: HashMap<usize, String>, // For new column
+    pub schema_insert_row: HashMap<usize, String>,              // For new column
     pub status_message: Option<String>, // Temporary status message (e.g., "Copied!")
 }
 
@@ -230,7 +230,11 @@ impl ResultsViewer {
             }
             if self.insert_mode {
                 // Load insert row value if it exists
-                self.edit_buffer = self.insert_row.get(&self.selected_column).cloned().unwrap_or_default();
+                self.edit_buffer = self
+                    .insert_row
+                    .get(&self.selected_column)
+                    .cloned()
+                    .unwrap_or_default();
             } else if let Some(value) = self.get_current_cell_value() {
                 self.edit_buffer = value;
             }
@@ -244,11 +248,17 @@ impl ResultsViewer {
                 // Auto-scroll if selected column goes off screen to the right
                 let visible_end = self.horizontal_scroll + self.visible_columns;
                 if self.selected_column >= visible_end {
-                    self.horizontal_scroll = self.selected_column.saturating_sub(self.visible_columns - 1);
+                    self.horizontal_scroll = self
+                        .selected_column
+                        .saturating_sub(self.visible_columns - 1);
                 }
                 if self.insert_mode {
                     // Load insert row value if it exists
-                    self.edit_buffer = self.insert_row.get(&self.selected_column).cloned().unwrap_or_default();
+                    self.edit_buffer = self
+                        .insert_row
+                        .get(&self.selected_column)
+                        .cloned()
+                        .unwrap_or_default();
                 } else if let Some(value) = self.get_current_cell_value() {
                     self.edit_buffer = value;
                 }
@@ -267,7 +277,8 @@ impl ResultsViewer {
     pub fn save_cell_edit(&mut self) {
         let row = self.table_state.selected().unwrap_or(0);
         let col = self.selected_column;
-        self.modified_cells.insert((row, col), self.edit_buffer.clone());
+        self.modified_cells
+            .insert((row, col), self.edit_buffer.clone());
     }
 
     pub fn get_current_cell_value(&self) -> Option<String> {
@@ -315,7 +326,10 @@ impl ResultsViewer {
         // Group modifications by row
         let mut rows_to_update: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
         for ((row, col), value) in &self.modified_cells {
-            rows_to_update.entry(*row).or_default().push((*col, value.clone()));
+            rows_to_update
+                .entry(*row)
+                .or_default()
+                .push((*col, value.clone()));
         }
 
         // Generate UPDATE query for each modified row
@@ -327,14 +341,22 @@ impl ResultsViewer {
                 // Build SET clauses for modified columns
                 for (col_idx, new_value) in &modifications {
                     if let Some(col_name) = result.columns.get(*col_idx) {
-                        set_clauses.push(format!("{} = '{}'", col_name, new_value.replace("'", "''")));
+                        set_clauses.push(format!(
+                            "{} = '{}'",
+                            col_name,
+                            new_value.replace("'", "''")
+                        ));
                     }
                 }
 
                 // Build WHERE clause using all original column values
                 for (col_idx, col_name) in result.columns.iter().enumerate() {
                     if let Some(original_value) = row_data.get(col_idx) {
-                        where_clauses.push(format!("{} = '{}'", col_name, original_value.replace("'", "''")));
+                        where_clauses.push(format!(
+                            "{} = '{}'",
+                            col_name,
+                            original_value.replace("'", "''")
+                        ));
                     }
                 }
 
@@ -421,8 +443,10 @@ impl ResultsViewer {
     }
 
     pub fn has_any_changes(&self) -> bool {
-        !self.modified_cells.is_empty() || !self.insert_row.is_empty() ||
-        !self.schema_modified_cells.is_empty() || !self.schema_insert_row.is_empty()
+        !self.modified_cells.is_empty()
+            || !self.insert_row.is_empty()
+            || !self.schema_modified_cells.is_empty()
+            || !self.schema_insert_row.is_empty()
     }
 
     pub fn switch_to_data_tab(&mut self) {
@@ -483,17 +507,20 @@ impl ResultsViewer {
             self.save_schema_cell_edit();
             self.schema_selected_column -= 1;
             let selected_row = self.schema_table_state.selected().unwrap_or(0);
-            let current_value = self.get_schema_cell_value(selected_row, self.schema_selected_column);
+            let current_value =
+                self.get_schema_cell_value(selected_row, self.schema_selected_column);
             self.schema_edit_buffer = current_value;
         }
     }
 
     pub fn schema_move_column_right(&mut self) {
-        if self.schema_selected_column < 4 { // 5 columns: name, type, nullable, default, extra
+        if self.schema_selected_column < 4 {
+            // 5 columns: name, type, nullable, default, extra
             self.save_schema_cell_edit();
             self.schema_selected_column += 1;
             let selected_row = self.schema_table_state.selected().unwrap_or(0);
-            let current_value = self.get_schema_cell_value(selected_row, self.schema_selected_column);
+            let current_value =
+                self.get_schema_cell_value(selected_row, self.schema_selected_column);
             self.schema_edit_buffer = current_value;
         }
     }
@@ -509,11 +536,13 @@ impl ResultsViewer {
     pub fn save_schema_cell_edit(&mut self) {
         let selected_row = self.schema_table_state.selected().unwrap_or(0);
         let col_idx = self.schema_selected_column;
-        self.schema_modified_cells.insert((selected_row, col_idx), self.schema_edit_buffer.clone());
+        self.schema_modified_cells
+            .insert((selected_row, col_idx), self.schema_edit_buffer.clone());
     }
 
     pub fn save_schema_insert_field(&mut self) {
-        self.schema_insert_row.insert(self.schema_selected_column, self.schema_edit_buffer.clone());
+        self.schema_insert_row
+            .insert(self.schema_selected_column, self.schema_edit_buffer.clone());
         self.schema_edit_buffer.clear();
     }
 
@@ -576,14 +605,22 @@ impl ResultsViewer {
             // Render tabs
             let tab_titles = vec!["1. Data", "2. Schema", "3. Indexes"];
             let tabs = Tabs::new(tab_titles)
-                .block(Block::default().borders(Borders::ALL).border_style(border_style))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(border_style),
+                )
                 .select(match self.active_tab {
                     TabMode::Data => 0,
                     TabMode::Schema => 1,
                     TabMode::Indexes => 2,
                 })
                 .style(Style::default().fg(Color::White))
-                .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+                .highlight_style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                );
 
             frame.render_widget(tabs, chunks[0]);
 
@@ -607,36 +644,32 @@ impl ResultsViewer {
             // Calculate how many columns can fit in the available width
             // Assume each column needs at least 15 characters (to accommodate headers)
             let available_width = area.width.saturating_sub(4); // Account for borders
-            self.visible_columns = ((available_width / 15).max(1) as usize).min(result.columns.len());
+            self.visible_columns =
+                ((available_width / 15).max(1) as usize).min(result.columns.len());
 
             // Determine which columns to display based on horizontal scroll
             let start_col = self.horizontal_scroll;
             let end_col = (start_col + self.visible_columns).min(result.columns.len());
-            
+
             // Create header with visible columns only - make it more prominent
             let visible_columns = &result.columns[start_col..end_col];
-            let header_cells = visible_columns
-                .iter()
-                .enumerate()
-                .map(|(idx, h)| {
-                    let col_idx = start_col + idx;
-                    let style = if col_idx == self.selected_column {
-                        // Highlight selected column header
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD)
-                    };
-                    Cell::from(format!(" {} ", h)).style(style)
-                });
-            let header = Row::new(header_cells)
-                .height(1)
-                .bottom_margin(0);
+            let header_cells = visible_columns.iter().enumerate().map(|(idx, h)| {
+                let col_idx = start_col + idx;
+                let style = if col_idx == self.selected_column {
+                    // Highlight selected column header
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                };
+                Cell::from(format!(" {} ", h)).style(style)
+            });
+            let header = Row::new(header_cells).height(1).bottom_margin(0);
 
             let selected_row = self.table_state.selected().unwrap_or(0);
 
@@ -648,20 +681,28 @@ impl ResultsViewer {
                 let insert_cells = (start_col..end_col).map(|col_idx| {
                     if col_idx == self.selected_column {
                         // Show edit buffer for currently editing cell
-                        Cell::from(format!(" {} ", self.edit_buffer.clone()))
-                            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                        Cell::from(format!(" {} ", self.edit_buffer.clone())).style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
                     } else if let Some(value) = self.insert_row.get(&col_idx) {
                         // Show entered value
-                        Cell::from(format!(" {} ", value))
-                            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
+                        Cell::from(format!(" {} ", value)).style(
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::ITALIC),
+                        )
                     } else {
                         // Show empty cell
                         Cell::from(" ")
                     }
                 });
-                let insert_row = Row::new(insert_cells)
-                    .height(1)
-                    .style(Style::default().bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD));
+                let insert_row = Row::new(insert_cells).height(1).style(
+                    Style::default()
+                        .bg(Color::Rgb(50, 50, 50))
+                        .add_modifier(Modifier::BOLD),
+                );
                 all_rows.push(insert_row);
             }
 
@@ -672,13 +713,21 @@ impl ResultsViewer {
                     let is_selected_column = col_idx == self.selected_column;
 
                     // Check if this is the currently editing cell
-                    if self.edit_mode && row_idx == selected_row && col_idx == self.selected_column {
+                    if self.edit_mode && row_idx == selected_row && col_idx == self.selected_column
+                    {
                         // Show edit buffer for currently editing cell with padding
-                        Cell::from(format!(" {} ", self.edit_buffer.clone()))
-                            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-                    } else if let Some(modified_value) = self.modified_cells.get(&(row_idx, col_idx)) {
+                        Cell::from(format!(" {} ", self.edit_buffer.clone())).style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else if let Some(modified_value) =
+                        self.modified_cells.get(&(row_idx, col_idx))
+                    {
                         // Show modified value for edited cells with padding
-                        let mut style = Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC);
+                        let mut style = Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::ITALIC);
                         if is_selected_column && !self.edit_mode {
                             style = style.bg(Color::Rgb(60, 60, 80));
                         }
@@ -702,7 +751,9 @@ impl ResultsViewer {
                 .map(|col_idx| {
                     // Calculate max width needed for this column
                     let header_width = result.columns.get(col_idx).map(|h| h.len()).unwrap_or(0);
-                    let max_content_width = result.rows.iter()
+                    let max_content_width = result
+                        .rows
+                        .iter()
                         .filter_map(|row| row.get(col_idx))
                         .map(|cell| cell.len())
                         .max()
@@ -722,16 +773,17 @@ impl ResultsViewer {
             if result.execution_time_ms > 0 {
                 title.push_str(&format!("- {}ms ", result.execution_time_ms));
             }
-            
+
             // Add scroll information to title
             if result.columns.len() > self.visible_columns {
-                title.push_str(&format!("- Cols {}-{}/{} ", 
-                    start_col + 1, 
-                    end_col, 
+                title.push_str(&format!(
+                    "- Cols {}-{}/{} ",
+                    start_col + 1,
+                    end_col,
                     result.columns.len()
                 ));
             }
-            
+
             if self.insert_mode {
                 title.push_str("- [INSERT MODE] ");
             }
@@ -778,14 +830,16 @@ impl ResultsViewer {
 
     fn render_schema_tab(&mut self, frame: &mut Frame, area: Rect, border_style: Style) {
         if self.schema_columns.is_empty() {
-            let paragraph = Paragraph::new("No schema information available.\nPress Enter on a table to load schema.")
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" Table Schema ")
-                        .border_style(border_style),
-                )
-                .style(Style::default().fg(Color::White));
+            let paragraph = Paragraph::new(
+                "No schema information available.\nPress Enter on a table to load schema.",
+            )
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Table Schema ")
+                    .border_style(border_style),
+            )
+            .style(Style::default().fg(Color::White));
             frame.render_widget(paragraph, area);
             return;
         }
@@ -793,12 +847,14 @@ impl ResultsViewer {
         // Create header
         let header_cells = vec!["Column Name", "Data Type", "Nullable", "Default", "Extra"]
             .into_iter()
-            .map(|h| Cell::from(format!(" {} ", h)).style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            ));
+            .map(|h| {
+                Cell::from(format!(" {} ", h)).style(
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+            });
         let header = Row::new(header_cells).height(1);
 
         let selected_row = self.schema_table_state.selected().unwrap_or(0);
@@ -810,18 +866,26 @@ impl ResultsViewer {
         if self.schema_insert_mode {
             let insert_cells = (0..5).map(|col_idx| {
                 if col_idx == self.schema_selected_column {
-                    Cell::from(format!(" {} ", self.schema_edit_buffer.clone()))
-                        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                    Cell::from(format!(" {} ", self.schema_edit_buffer.clone())).style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else if let Some(value) = self.schema_insert_row.get(&col_idx) {
-                    Cell::from(format!(" {} ", value))
-                        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::ITALIC))
+                    Cell::from(format!(" {} ", value)).style(
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::ITALIC),
+                    )
                 } else {
                     Cell::from(" ")
                 }
             });
-            let insert_row = Row::new(insert_cells)
-                .height(1)
-                .style(Style::default().bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD));
+            let insert_row = Row::new(insert_cells).height(1).style(
+                Style::default()
+                    .bg(Color::Rgb(50, 50, 50))
+                    .add_modifier(Modifier::BOLD),
+            );
             all_rows.push(insert_row);
         }
 
@@ -830,12 +894,21 @@ impl ResultsViewer {
             let cells = (0..5).map(|col_idx| {
                 let cell_value = self.get_schema_cell_value(row_idx, col_idx);
 
-                if self.schema_edit_mode && row_idx == selected_row && col_idx == self.schema_selected_column {
-                    Cell::from(format!(" {} ", self.schema_edit_buffer.clone()))
-                        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                if self.schema_edit_mode
+                    && row_idx == selected_row
+                    && col_idx == self.schema_selected_column
+                {
+                    Cell::from(format!(" {} ", self.schema_edit_buffer.clone())).style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )
                 } else if self.schema_modified_cells.contains_key(&(row_idx, col_idx)) {
-                    Cell::from(format!(" {} ", cell_value))
-                        .style(Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC))
+                    Cell::from(format!(" {} ", cell_value)).style(
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::ITALIC),
+                    )
                 } else {
                     Cell::from(format!(" {} ", cell_value))
                 }
@@ -916,4 +989,3 @@ impl ResultsViewer {
         frame.render_widget(paragraph, area);
     }
 }
-

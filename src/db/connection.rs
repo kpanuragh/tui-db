@@ -60,12 +60,19 @@ impl QueryResult {
 }
 
 pub trait DatabaseConnection: Send {
-    fn connect(path: &str) -> Result<Box<Self>> where Self: Sized;
+    fn connect(path: &str) -> Result<Box<Self>>
+    where
+        Self: Sized;
     fn execute_query(&mut self, query: &str) -> Result<QueryResult>;
     fn list_tables(&mut self) -> Result<Vec<TableInfo>>;
     #[allow(dead_code)]
     fn get_table_columns(&mut self, table_name: &str) -> Result<Vec<ColumnInfo>>;
-    fn get_table_data(&mut self, table_name: &str, limit: usize, offset: usize) -> Result<QueryResult>;
+    fn get_table_data(
+        &mut self,
+        table_name: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<QueryResult>;
     #[allow(dead_code)]
     fn close(&mut self) -> Result<()>;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;

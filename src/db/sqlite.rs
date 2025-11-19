@@ -63,11 +63,8 @@ impl DatabaseConnection for SQLiteConnection {
 
             if trimmed.starts_with("SELECT") || trimmed.starts_with("PRAGMA") {
                 let mut stmt = self.conn.prepare(stmt_text)?;
-                let column_names: Vec<String> = stmt
-                    .column_names()
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
+                let column_names: Vec<String> =
+                    stmt.column_names().iter().map(|s| s.to_string()).collect();
                 let column_count = column_names.len();
 
                 let rows = stmt
@@ -108,11 +105,11 @@ impl DatabaseConnection for SQLiteConnection {
 
         let mut table_infos = Vec::new();
         for table in tables {
-            let count: Result<usize, _> = self.conn.query_row(
-                &format!("SELECT COUNT(*) FROM {}", table),
-                [],
-                |row| row.get(0),
-            );
+            let count: Result<usize, _> =
+                self.conn
+                    .query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                        row.get(0)
+                    });
             table_infos.push(TableInfo {
                 name: table,
                 row_count: count.ok(),
@@ -123,7 +120,9 @@ impl DatabaseConnection for SQLiteConnection {
     }
 
     fn get_table_columns(&mut self, table_name: &str) -> Result<Vec<ColumnInfo>> {
-        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({})", table_name))?;
+        let mut stmt = self
+            .conn
+            .prepare(&format!("PRAGMA table_info({})", table_name))?;
 
         let columns = stmt
             .query_map([], |row| {
@@ -139,7 +138,12 @@ impl DatabaseConnection for SQLiteConnection {
         Ok(columns)
     }
 
-    fn get_table_data(&mut self, table_name: &str, limit: usize, offset: usize) -> Result<QueryResult> {
+    fn get_table_data(
+        &mut self,
+        table_name: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<QueryResult> {
         let query = format!(
             "SELECT * FROM {} LIMIT {} OFFSET {}",
             table_name, limit, offset

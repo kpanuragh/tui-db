@@ -1,3 +1,3 @@
 pub mod mode;
 
-pub use mode::{VimMode, VimState, VimCommand};
+pub use mode::{VimCommand, VimMode, VimState};

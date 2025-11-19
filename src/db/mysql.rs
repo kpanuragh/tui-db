@@ -19,7 +19,7 @@ impl MySQLConnection {
         // Clear any database context to start with database list
         conn.query_drop("USE information_schema")?;
 
-        Ok(Box::new(MySQLConnection { 
+        Ok(Box::new(MySQLConnection {
             conn,
             current_database: None,
         }))
@@ -29,16 +29,19 @@ impl MySQLConnection {
         let query = format!("USE `{}`", database_name);
         self.conn.query_drop(&query)?;
         self.current_database = Some(database_name.to_string());
-        
+
         // Verify the database was set correctly
         let verification_result: Vec<Row> = self.conn.query("SELECT DATABASE()")?;
         if let Some(row) = verification_result.first() {
             let verified_db: Option<String> = row.get::<Option<String>, _>(0).unwrap_or(None);
             if verified_db.is_none() || verified_db.as_ref().unwrap() != database_name {
-                return Err(anyhow::anyhow!("Failed to switch to database: {}", database_name));
+                return Err(anyhow::anyhow!(
+                    "Failed to switch to database: {}",
+                    database_name
+                ));
             }
         }
-        
+
         Ok(())
     }
 
@@ -61,7 +64,10 @@ impl MySQLConnection {
 }
 
 impl DatabaseConnection for MySQLConnection {
-    fn connect(path: &str) -> Result<Box<Self>> where Self: Sized {
+    fn connect(path: &str) -> Result<Box<Self>>
+    where
+        Self: Sized,
+    {
         let opts = Opts::from_url(path)?;
         let pool = Pool::new(opts)?;
         let mut conn = pool.get_conn()?;
@@ -69,7 +75,7 @@ impl DatabaseConnection for MySQLConnection {
         // Clear any database context to start with database list
         conn.query_drop("USE information_schema")?;
 
-        Ok(Box::new(MySQLConnection { 
+        Ok(Box::new(MySQLConnection {
             conn,
             current_database: None,
         }))
@@ -90,8 +96,11 @@ impl DatabaseConnection for MySQLConnection {
         for stmt_text in statements {
             let stmt_upper = stmt_text.to_uppercase();
 
-            if stmt_upper.starts_with("SELECT") || stmt_upper.starts_with("SHOW") ||
-               stmt_upper.starts_with("DESCRIBE") || stmt_upper.starts_with("EXPLAIN") {
+            if stmt_upper.starts_with("SELECT")
+                || stmt_upper.starts_with("SHOW")
+                || stmt_upper.starts_with("DESCRIBE")
+                || stmt_upper.starts_with("EXPLAIN")
+            {
                 // Query that returns rows
                 let result: Vec<Row> = self.conn.query(stmt_text)?;
 
@@ -116,24 +125,53 @@ impl DatabaseConnection for MySQLConnection {
                                 Some(Ok(val)) => {
                                     // Convert MySQL value to string based on its type
                                     match val {
-                                        mysql::Value::Bytes(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+                                        mysql::Value::Bytes(bytes) => {
+                                            String::from_utf8_lossy(&bytes).to_string()
+                                        }
                                         mysql::Value::Int(i) => i.to_string(),
                                         mysql::Value::UInt(u) => u.to_string(),
                                         mysql::Value::Float(f) => f.to_string(),
                                         mysql::Value::Double(d) => d.to_string(),
-                                        mysql::Value::Date(year, month, day, hour, min, sec, micro) => {
+                                        mysql::Value::Date(
+                                            year,
+                                            month,
+                                            day,
+                                            hour,
+                                            min,
+                                            sec,
+                                            micro,
+                                        ) => {
                                             if hour == 0 && min == 0 && sec == 0 && micro == 0 {
                                                 format!("{:04}-{:02}-{:02}", year, month, day)
                                             } else {
-                                                format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hour, min, sec)
+                                                format!(
+                                                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                                                    year, month, day, hour, min, sec
+                                                )
                                             }
                                         }
-                                        mysql::Value::Time(negative, days, hours, minutes, seconds, _microseconds) => {
+                                        mysql::Value::Time(
+                                            negative,
+                                            days,
+                                            hours,
+                                            minutes,
+                                            seconds,
+                                            _microseconds,
+                                        ) => {
                                             let sign = if negative { "-" } else { "" };
                                             if days > 0 {
-                                                format!("{}{:02}:{:02}:{:02}", sign, days * 24 + hours as u32, minutes, seconds)
+                                                format!(
+                                                    "{}{:02}:{:02}:{:02}",
+                                                    sign,
+                                                    days * 24 + hours as u32,
+                                                    minutes,
+                                                    seconds
+                                                )
                                             } else {
-                                                format!("{}{:02}:{:02}:{:02}", sign, hours, minutes, seconds)
+                                                format!(
+                                                    "{}{:02}:{:02}:{:02}",
+                                                    sign, hours, minutes, seconds
+                                                )
                                             }
                                         }
                                         mysql::Value::NULL => "NULL".to_string(),
@@ -152,8 +190,8 @@ impl DatabaseConnection for MySQLConnection {
                 // INSERT, UPDATE, DELETE, CREATE, DROP, etc.
                 self.conn.query_drop(stmt_text)?;
                 let affected = self.conn.affected_rows();
-                last_result = QueryResult::new(Vec::new(), Vec::new())
-                    .with_affected(affected as usize);
+                last_result =
+                    QueryResult::new(Vec::new(), Vec::new()).with_affected(affected as usize);
             }
         }
 
@@ -169,7 +207,7 @@ impl DatabaseConnection for MySQLConnection {
         } else {
             None
         };
-        
+
         if let Some(db_name) = current_db {
             if !db_name.is_empty() && db_name != "information_schema" {
                 // We have a current database, show tables
@@ -186,7 +224,8 @@ impl DatabaseConnection for MySQLConnection {
 
                     // Get row count for each table, with error handling
                     let count_query = format!("SELECT COUNT(*) FROM `{}`", table_name);
-                    let count: Option<u64> = self.conn.query_first(&count_query).unwrap_or_default();
+                    let count: Option<u64> =
+                        self.conn.query_first(&count_query).unwrap_or_default();
 
                     tables.push(TableInfo {
                         name: table_name,
@@ -202,7 +241,9 @@ impl DatabaseConnection for MySQLConnection {
                 let mut databases = Vec::new();
                 for row in result {
                     let db_name: String = row.get(0).unwrap_or_default();
-                    if !["information_schema", "mysql", "performance_schema", "sys"].contains(&db_name.as_str()) {
+                    if !["information_schema", "mysql", "performance_schema", "sys"]
+                        .contains(&db_name.as_str())
+                    {
                         databases.push(TableInfo {
                             name: db_name,
                             row_count: None,
@@ -217,13 +258,15 @@ impl DatabaseConnection for MySQLConnection {
             let result: Vec<Row> = self.conn.query(query)?;
 
             let mut databases = Vec::new();
-                for row in result {
-                    // Get the database name from our safe query
-                    let db_name: String = row.get("db_name").unwrap_or_default();
-                    if db_name.is_empty() {
-                        continue; // Skip empty names
-                    }                // Skip system databases for cleaner display
-                if !["information_schema", "mysql", "performance_schema", "sys"].contains(&db_name.as_str()) {
+            for row in result {
+                // Get the database name from our safe query
+                let db_name: String = row.get("db_name").unwrap_or_default();
+                if db_name.is_empty() {
+                    continue; // Skip empty names
+                } // Skip system databases for cleaner display
+                if !["information_schema", "mysql", "performance_schema", "sys"]
+                    .contains(&db_name.as_str())
+                {
                     databases.push(TableInfo {
                         name: db_name,
                         row_count: None, // Don't calculate database sizes for now
@@ -234,27 +277,42 @@ impl DatabaseConnection for MySQLConnection {
         }
     }
 
-    fn get_table_columns(&mut self, _table_name: &str) -> Result<Vec<super::connection::ColumnInfo>> {
+    fn get_table_columns(
+        &mut self,
+        _table_name: &str,
+    ) -> Result<Vec<super::connection::ColumnInfo>> {
         // Not implemented yet
         Ok(Vec::new())
     }
 
-    fn get_table_data(&mut self, table_name: &str, limit: usize, offset: usize) -> Result<QueryResult> {
+    fn get_table_data(
+        &mut self,
+        table_name: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<QueryResult> {
         // Always get the current database from MySQL to ensure we have the right context
         let current_db = self.get_current_database()?;
-        
+
         let qualified_table_name = if let Some(db_name) = current_db {
             if !db_name.is_empty() {
                 // Use fully qualified table name
                 format!("`{}`.`{}`", db_name, table_name)
             } else {
-                return Err(anyhow::anyhow!("No database selected. Please select a database first."));
+                return Err(anyhow::anyhow!(
+                    "No database selected. Please select a database first."
+                ));
             }
         } else {
-            return Err(anyhow::anyhow!("No database selected. Please select a database first."));
+            return Err(anyhow::anyhow!(
+                "No database selected. Please select a database first."
+            ));
         };
-        
-        let query = format!("SELECT * FROM {} LIMIT {} OFFSET {}", qualified_table_name, limit, offset);
+
+        let query = format!(
+            "SELECT * FROM {} LIMIT {} OFFSET {}",
+            qualified_table_name, limit, offset
+        );
         self.execute_query(&query)
     }
 

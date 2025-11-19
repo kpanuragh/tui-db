@@ -365,7 +365,7 @@ pub enum VimCommand {
     #[allow(dead_code)]
     CloseConnectionManager,
     #[allow(dead_code)]
-    ConnectionManagerAction(char),  // n, e, d, t, Enter
+    ConnectionManagerAction(char), // n, e, d, t, Enter
 
     // Results Viewer Tabs
     #[allow(dead_code)]

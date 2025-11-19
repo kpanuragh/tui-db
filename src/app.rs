@@ -8,8 +8,11 @@ use std::time::Duration;
 use arboard::SetExtLinux;
 
 use crate::config::Config;
-use crate::db::{sqlite::SQLiteConnection, mysql::MySQLConnection, ConnectionInfo, DatabaseConnection, DatabaseType};
-use crate::ui::{DatabaseBrowser, QueryEditor, ResultsViewer, ConnectionManager};
+use crate::db::{
+    mysql::MySQLConnection, sqlite::SQLiteConnection, ConnectionInfo, DatabaseConnection,
+    DatabaseType,
+};
+use crate::ui::{ConnectionManager, DatabaseBrowser, QueryEditor, ResultsViewer};
 use crate::vim::{VimCommand, VimMode, VimState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,14 +78,17 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key: KeyEvent) -> Result<()> {
-        use crossterm::event::{KeyCode, KeyModifiers};
         use crate::ui::connection_manager::ConnectionManagerMode;
+        use crossterm::event::{KeyCode, KeyModifiers};
 
         // If connection manager is visible, handle keys differently
         if self.connection_manager.visible {
             match key.code {
                 KeyCode::Esc => {
-                    if matches!(self.connection_manager.mode, ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)) {
+                    if matches!(
+                        self.connection_manager.mode,
+                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)
+                    ) {
                         self.connection_manager.mode = ConnectionManagerMode::List;
                         self.connection_manager.test_result = None;
                     } else {
@@ -99,44 +105,60 @@ impl App {
                         ConnectionManagerMode::List => {
                             self.handle_connection_manager_action(c)?;
                         }
-                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_) => {
-                            match c {
-                                ' ' if self.connection_manager.form.active_field == crate::ui::connection_manager::FormField::Type => {
-                                    self.connection_manager.cycle_db_type();
-                                }
-                                _ => {
-                                    self.connection_manager.insert_char(c);
-                                }
+                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_) => match c {
+                            ' ' if self.connection_manager.form.active_field
+                                == crate::ui::connection_manager::FormField::Type =>
+                            {
+                                self.connection_manager.cycle_db_type();
                             }
-                        }
+                            _ => {
+                                self.connection_manager.insert_char(c);
+                            }
+                        },
                         _ => {}
                     }
                 }
                 KeyCode::Backspace => {
-                    if matches!(self.connection_manager.mode, ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)) {
+                    if matches!(
+                        self.connection_manager.mode,
+                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)
+                    ) {
                         self.connection_manager.delete_char();
                     }
                 }
                 KeyCode::Tab => {
-                    if matches!(self.connection_manager.mode, ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)) {
+                    if matches!(
+                        self.connection_manager.mode,
+                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)
+                    ) {
                         self.connection_manager.next_field();
                     }
                 }
                 KeyCode::BackTab => {
-                    if matches!(self.connection_manager.mode, ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)) {
+                    if matches!(
+                        self.connection_manager.mode,
+                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)
+                    ) {
                         self.connection_manager.prev_field();
                     }
                 }
-                KeyCode::Up | KeyCode::Char('k') if matches!(self.connection_manager.mode, ConnectionManagerMode::List) => {
+                KeyCode::Up | KeyCode::Char('k')
+                    if matches!(self.connection_manager.mode, ConnectionManagerMode::List) =>
+                {
                     self.connection_manager.move_list_up();
                 }
-                KeyCode::Down | KeyCode::Char('j') if matches!(self.connection_manager.mode, ConnectionManagerMode::List) => {
+                KeyCode::Down | KeyCode::Char('j')
+                    if matches!(self.connection_manager.mode, ConnectionManagerMode::List) =>
+                {
                     let max = self.config.get_connections().len();
                     self.connection_manager.move_list_down(max);
                 }
                 KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     // Test connection from form
-                    if matches!(self.connection_manager.mode, ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)) {
+                    if matches!(
+                        self.connection_manager.mode,
+                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)
+                    ) {
                         let conn_str = self.connection_manager.get_connection_string();
                         let db_type = self.connection_manager.form.db_type.clone();
                         self.test_connection(&conn_str, db_type)?;
@@ -144,7 +166,10 @@ impl App {
                 }
                 KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     // Save connection from form
-                    if matches!(self.connection_manager.mode, ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)) {
+                    if matches!(
+                        self.connection_manager.mode,
+                        ConnectionManagerMode::Add | ConnectionManagerMode::Edit(_)
+                    ) {
                         self.save_connection_from_form()?;
                     }
                 }
@@ -202,7 +227,12 @@ impl App {
         }
 
         // Handle tab switching in Results pane (1, 2, 3 keys)
-        if self.active_pane == Pane::Results && !self.results_viewer.edit_mode && !self.results_viewer.insert_mode && !self.results_viewer.schema_edit_mode && !self.results_viewer.schema_insert_mode {
+        if self.active_pane == Pane::Results
+            && !self.results_viewer.edit_mode
+            && !self.results_viewer.insert_mode
+            && !self.results_viewer.schema_edit_mode
+            && !self.results_viewer.schema_insert_mode
+        {
             match key.code {
                 KeyCode::Char('1') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.results_viewer.switch_to_data_tab();
@@ -221,8 +251,11 @@ impl App {
         }
 
         // Handle Ctrl+D for discard changes
-        if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL)
-            && self.active_pane == Pane::Results && self.results_viewer.has_any_changes() {
+        if key.code == KeyCode::Char('d')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.active_pane == Pane::Results
+            && self.results_viewer.has_any_changes()
+        {
             if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
                 self.results_viewer.discard_schema_changes();
             } else {
@@ -233,8 +266,10 @@ impl App {
         }
 
         // Handle schema tab edit/insert mode key input
-        if self.active_pane == Pane::Results && self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
-            && (self.results_viewer.schema_edit_mode || self.results_viewer.schema_insert_mode) {
+        if self.active_pane == Pane::Results
+            && self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
+            && (self.results_viewer.schema_edit_mode || self.results_viewer.schema_insert_mode)
+        {
             match key.code {
                 KeyCode::Esc => {
                     if self.results_viewer.schema_edit_mode {
@@ -328,7 +363,8 @@ impl App {
             }
             VimCommand::EnterInsertRowMode => {
                 if self.active_pane == Pane::Results {
-                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
+                    {
                         self.results_viewer.enter_schema_insert_mode();
                         self.vim_state.enter_insert_mode();
                     } else {
@@ -344,7 +380,8 @@ impl App {
             }
             VimCommand::EnterEditMode => {
                 if self.active_pane == Pane::Results {
-                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
+                    {
                         self.results_viewer.enter_schema_edit_mode();
                         self.vim_state.enter_insert_mode();
                     } else {
@@ -403,7 +440,8 @@ impl App {
                     self.query_editor.move_up(count);
                 }
                 Pane::Results => {
-                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
+                    {
                         for _ in 0..count {
                             self.results_viewer.schema_move_up();
                         }
@@ -422,7 +460,8 @@ impl App {
                     self.query_editor.move_down(count);
                 }
                 Pane::Results => {
-                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
+                    {
                         for _ in 0..count {
                             self.results_viewer.schema_move_down();
                         }
@@ -495,14 +534,15 @@ impl App {
                 if self.vim_state.mode == VimMode::Insert {
                     if self.active_pane == Pane::QueryEditor {
                         self.query_editor.insert_char(c);
-                    } else if self.active_pane == Pane::Results && (self.results_viewer.edit_mode || self.results_viewer.insert_mode) {
+                    } else if self.active_pane == Pane::Results
+                        && (self.results_viewer.edit_mode || self.results_viewer.insert_mode)
+                    {
                         self.results_viewer.edit_insert_char(c);
                     }
                 }
             }
             VimCommand::InsertNewline => {
-                if self.vim_state.mode == VimMode::Insert && self.active_pane == Pane::QueryEditor
-                {
+                if self.vim_state.mode == VimMode::Insert && self.active_pane == Pane::QueryEditor {
                     self.query_editor.insert_newline();
                 }
             }
@@ -510,7 +550,9 @@ impl App {
                 if self.vim_state.mode == VimMode::Insert {
                     if self.active_pane == Pane::QueryEditor {
                         self.query_editor.backspace();
-                    } else if self.active_pane == Pane::Results && (self.results_viewer.edit_mode || self.results_viewer.insert_mode) {
+                    } else if self.active_pane == Pane::Results
+                        && (self.results_viewer.edit_mode || self.results_viewer.insert_mode)
+                    {
                         self.results_viewer.edit_backspace();
                     }
                 }
@@ -549,7 +591,8 @@ impl App {
             }
             VimCommand::DiscardChanges => {
                 if self.active_pane == Pane::Results {
-                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                    if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
+                    {
                         self.results_viewer.discard_schema_changes();
                     } else {
                         self.results_viewer.discard_all_changes();
@@ -579,28 +622,30 @@ impl App {
                         // Copy to system clipboard using the persistent instance
                         if let Some(clipboard) = &mut self.system_clipboard {
                             #[cfg(target_os = "linux")]
-                            let result = clipboard.set()
-                                .wait()
-                                .text(&value);
+                            let result = clipboard.set().wait().text(&value);
 
                             #[cfg(not(target_os = "linux"))]
                             let result = clipboard.set_text(&value);
 
                             match result {
                                 Ok(_) => {
-                                    self.results_viewer.set_status_message(format!("Copied to clipboard: {}",
+                                    self.results_viewer.set_status_message(format!(
+                                        "Copied to clipboard: {}",
                                         if value.len() > 50 {
                                             format!("{}...", &value[..50])
                                         } else {
                                             value
-                                        }));
+                                        }
+                                    ));
                                 }
                                 Err(e) => {
-                                    self.results_viewer.set_status_message(format!("Copy failed: {}", e));
+                                    self.results_viewer
+                                        .set_status_message(format!("Copy failed: {}", e));
                                 }
                             }
                         } else {
-                            self.results_viewer.set_status_message("Clipboard not available".to_string());
+                            self.results_viewer
+                                .set_status_message("Clipboard not available".to_string());
                         }
                     }
                 }
@@ -663,15 +708,29 @@ impl App {
         self.open_database_with_save(connection_string, db_type, true)
     }
 
-    fn open_database_no_save(&mut self, connection_string: &str, db_type: DatabaseType) -> Result<()> {
+    fn open_database_no_save(
+        &mut self,
+        connection_string: &str,
+        db_type: DatabaseType,
+    ) -> Result<()> {
         self.open_database_with_save(connection_string, db_type, false)
     }
 
-    fn open_database_with_save(&mut self, connection_string: &str, db_type: DatabaseType, save_to_config: bool) -> Result<()> {
+    fn open_database_with_save(
+        &mut self,
+        connection_string: &str,
+        db_type: DatabaseType,
+        save_to_config: bool,
+    ) -> Result<()> {
         // If a connection with the same connection string already exists in the UI,
         // reuse it instead of adding a duplicate entry. If the UI knows about it
         // but we haven't opened the actual connection object yet, open and insert it.
-        if let Some(existing) = self.database_browser.connections.iter().find(|c| c.connection_string == connection_string) {
+        if let Some(existing) = self
+            .database_browser
+            .connections
+            .iter()
+            .find(|c| c.connection_string == connection_string)
+        {
             // Select existing connection
             let id = existing.id;
             self.database_browser.selected_connection = Some(id);
@@ -680,7 +739,9 @@ impl App {
             if !self.connections.contains_key(&id) {
                 let mut conn: Box<dyn DatabaseConnection> = match db_type {
                     DatabaseType::SQLite => SQLiteConnection::connect(connection_string)?,
-                    DatabaseType::MySQL | DatabaseType::MariaDB => MySQLConnection::connect(connection_string)?,
+                    DatabaseType::MySQL | DatabaseType::MariaDB => {
+                        MySQLConnection::connect(connection_string)?
+                    }
                 };
 
                 // Load tables for the selected connection
@@ -695,7 +756,9 @@ impl App {
         // Create connection based on database type
         let mut conn: Box<dyn DatabaseConnection> = match db_type {
             DatabaseType::SQLite => SQLiteConnection::connect(connection_string)?,
-            DatabaseType::MySQL | DatabaseType::MariaDB => MySQLConnection::connect(connection_string)?,
+            DatabaseType::MySQL | DatabaseType::MariaDB => {
+                MySQLConnection::connect(connection_string)?
+            }
         };
 
         let id = self.next_connection_id;
@@ -703,13 +766,11 @@ impl App {
 
         // Generate connection name
         let name = match db_type {
-            DatabaseType::SQLite => {
-                std::path::Path::new(connection_string)
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(connection_string)
-                    .to_string()
-            },
+            DatabaseType::SQLite => std::path::Path::new(connection_string)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(connection_string)
+                .to_string(),
             DatabaseType::MySQL => {
                 // Extract database name from connection string if possible
                 if let Some(db_name) = connection_string.split('/').next_back() {
@@ -717,14 +778,14 @@ impl App {
                 } else {
                     format!("MySQL Connection {}", id)
                 }
-            },
+            }
             DatabaseType::MariaDB => {
                 if let Some(db_name) = connection_string.split('/').next_back() {
                     format!("MariaDB: {}", db_name.split('?').next().unwrap_or(db_name))
                 } else {
                     format!("MariaDB Connection {}", id)
                 }
-            },
+            }
         };
 
         let conn_info = ConnectionInfo {
@@ -750,7 +811,8 @@ impl App {
                 DatabaseType::MySQL => "mysql".to_string(),
                 DatabaseType::MariaDB => "mariadb".to_string(),
             };
-            self.config.add_connection(name, connection_string.to_string(), db_type_str);
+            self.config
+                .add_connection(name, connection_string.to_string(), db_type_str);
             self.config.save()?;
         }
 
@@ -760,18 +822,26 @@ impl App {
     fn go_back_to_database_list(&mut self) -> Result<()> {
         // Reset the database browser to show databases instead of tables
         self.database_browser.go_back_to_databases();
-        
+
         // For MySQL/MariaDB connections, clear database context and reload database list
         if let Some(conn_id) = self.database_browser.selected_connection {
             if let Some(conn) = self.connections.get_mut(&conn_id) {
-                let conn_info = self.database_browser.connections
+                let conn_info = self
+                    .database_browser
+                    .connections
                     .iter()
                     .find(|c| c.id == conn_id);
-                
+
                 if let Some(info) = conn_info {
-                    if matches!(info.db_type, crate::db::DatabaseType::MySQL | crate::db::DatabaseType::MariaDB) {
+                    if matches!(
+                        info.db_type,
+                        crate::db::DatabaseType::MySQL | crate::db::DatabaseType::MariaDB
+                    ) {
                         // For MySQL, clear the database context first, then get database list
-                        if let Some(mysql_conn) = conn.as_any_mut().downcast_mut::<crate::db::mysql::MySQLConnection>() {
+                        if let Some(mysql_conn) = conn
+                            .as_any_mut()
+                            .downcast_mut::<crate::db::mysql::MySQLConnection>()
+                        {
                             mysql_conn.clear_database_context()?;
                         }
                         let tables = conn.list_tables()?;
@@ -832,23 +902,35 @@ impl App {
         if let Some(conn_id) = self.database_browser.selected_connection {
             if let Some(conn) = self.connections.get_mut(&conn_id) {
                 // First, check if this is a MySQL connection and we might be selecting a database
-                let conn_info = self.database_browser.connections
+                let conn_info = self
+                    .database_browser
+                    .connections
                     .iter()
                     .find(|c| c.id == conn_id);
-                
+
                 if let Some(info) = conn_info {
-                    if matches!(info.db_type, crate::db::DatabaseType::MySQL | crate::db::DatabaseType::MariaDB) {
+                    if matches!(
+                        info.db_type,
+                        crate::db::DatabaseType::MySQL | crate::db::DatabaseType::MariaDB
+                    ) {
                         // For MySQL connections, check if we're looking at databases or tables
                         // If no table has row_count data, we're probably looking at databases
-                        let is_showing_databases = self.database_browser.tables.iter()
+                        let is_showing_databases = self
+                            .database_browser
+                            .tables
+                            .iter()
                             .all(|t| t.row_count.is_none());
-                        
+
                         if is_showing_databases {
                             // This is a database selection, switch to it
-                            if let Some(mysql_conn) = conn.as_any_mut().downcast_mut::<crate::db::mysql::MySQLConnection>() {
+                            if let Some(mysql_conn) =
+                                conn.as_any_mut()
+                                    .downcast_mut::<crate::db::mysql::MySQLConnection>()
+                            {
                                 mysql_conn.use_database(&selected_name)?;
                                 // Store the current database in the browser
-                                self.database_browser.set_current_database(Some(selected_name.clone()));
+                                self.database_browser
+                                    .set_current_database(Some(selected_name.clone()));
                                 // Reload tables for the selected database
                                 let tables = conn.list_tables()?;
                                 self.database_browser.set_tables(tables);
@@ -856,16 +938,20 @@ impl App {
                             }
                         } else {
                             // This is a table selection for MySQL, ensure database context
-                            if let Some(mysql_conn) = conn.as_any_mut().downcast_mut::<crate::db::mysql::MySQLConnection>() {
+                            if let Some(mysql_conn) =
+                                conn.as_any_mut()
+                                    .downcast_mut::<crate::db::mysql::MySQLConnection>()
+                            {
                                 // Ensure we're using the correct database
-                                if let Some(db_name) = self.database_browser.get_current_database() {
+                                if let Some(db_name) = self.database_browser.get_current_database()
+                                {
                                     mysql_conn.use_database(db_name)?;
                                 }
                             }
                         }
                     }
                 }
-                
+
                 // This is a table selection, load table data
                 let result = conn.get_table_data(&selected_name, 1000, 0)?;
 
@@ -1005,9 +1091,14 @@ impl App {
                                     "mariadb" => DatabaseType::MariaDB,
                                     _ => DatabaseType::SQLite,
                                 };
-                                
+
                                 // Use detailed form if we have individual components stored
-                                if conn.username.is_some() || conn.password.is_some() || conn.host.is_some() || conn.port.is_some() || conn.database.is_some() {
+                                if conn.username.is_some()
+                                    || conn.password.is_some()
+                                    || conn.host.is_some()
+                                    || conn.port.is_some()
+                                    || conn.database.is_some()
+                                {
                                     self.connection_manager.show_edit_form_detailed(
                                         selected,
                                         conn.name.clone(),
@@ -1044,7 +1135,9 @@ impl App {
                                 // Move selection if needed
                                 let conn_count = self.config.get_connections().len();
                                 if selected >= conn_count && conn_count > 0 {
-                                    self.connection_manager.list_state.select(Some(conn_count - 1));
+                                    self.connection_manager
+                                        .list_state
+                                        .select(Some(conn_count - 1));
                                 }
                             }
                         }
@@ -1079,15 +1172,19 @@ impl App {
                                         "mariadb" => DatabaseType::MariaDB,
                                         _ => DatabaseType::SQLite,
                                     };
-                                    
+
                                     // For MySQL/MariaDB, rebuild connection string if we have individual components
-                                    let connection_string = if matches!(db_type, DatabaseType::MySQL | DatabaseType::MariaDB) &&
-                                        (conn.username.is_some() || conn.host.is_some()) {
+                                    let connection_string = if matches!(
+                                        db_type,
+                                        DatabaseType::MySQL | DatabaseType::MariaDB
+                                    ) && (conn.username.is_some()
+                                        || conn.host.is_some())
+                                    {
                                         self.build_connection_string_from_config(conn, &db_type)
                                     } else {
                                         conn.connection_string.clone()
                                     };
-                                    
+
                                     (connection_string, db_type)
                                 })
                             };
@@ -1097,7 +1194,8 @@ impl App {
                                         self.connection_manager.hide();
                                     }
                                     Err(e) => {
-                                        self.connection_manager.test_result = Some(format!("✗ Connection failed: {}", e));
+                                        self.connection_manager.test_result =
+                                            Some(format!("✗ Connection failed: {}", e));
                                         // Don't hide the connection manager so user can see the error
                                         return Ok(());
                                     }
@@ -1133,21 +1231,25 @@ impl App {
         match self.connection_manager.form.db_type {
             DatabaseType::SQLite => {
                 if self.connection_manager.form.connection_string.is_empty() {
-                    self.connection_manager.test_result = Some("✗ Error: File path is required".to_string());
+                    self.connection_manager.test_result =
+                        Some("✗ Error: File path is required".to_string());
                     return Ok(());
                 }
             }
             DatabaseType::MySQL | DatabaseType::MariaDB => {
                 if self.connection_manager.form.username.is_empty() {
-                    self.connection_manager.test_result = Some("✗ Error: Username is required".to_string());
+                    self.connection_manager.test_result =
+                        Some("✗ Error: Username is required".to_string());
                     return Ok(());
                 }
                 if self.connection_manager.form.host.is_empty() {
-                    self.connection_manager.test_result = Some("✗ Error: Host is required".to_string());
+                    self.connection_manager.test_result =
+                        Some("✗ Error: Host is required".to_string());
                     return Ok(());
                 }
                 if self.connection_manager.form.port.is_empty() {
-                    self.connection_manager.test_result = Some("✗ Error: Port is required".to_string());
+                    self.connection_manager.test_result =
+                        Some("✗ Error: Port is required".to_string());
                     return Ok(());
                 }
             }
@@ -1163,14 +1265,35 @@ impl App {
         let connection_string = self.connection_manager.get_connection_string();
 
         // Prepare optional fields for MySQL/MariaDB
-        let (username, password, host, port, database) = match self.connection_manager.form.db_type {
+        let (username, password, host, port, database) = match self.connection_manager.form.db_type
+        {
             DatabaseType::SQLite => (None, None, None, None, None),
             DatabaseType::MySQL | DatabaseType::MariaDB => (
-                if self.connection_manager.form.username.is_empty() { None } else { Some(self.connection_manager.form.username.clone()) },
-                if self.connection_manager.form.password.is_empty() { None } else { Some(self.connection_manager.form.password.clone()) },
-                if self.connection_manager.form.host.is_empty() { None } else { Some(self.connection_manager.form.host.clone()) },
-                if self.connection_manager.form.port.is_empty() { None } else { Some(self.connection_manager.form.port.clone()) },
-                if self.connection_manager.form.database.is_empty() { None } else { Some(self.connection_manager.form.database.clone()) },
+                if self.connection_manager.form.username.is_empty() {
+                    None
+                } else {
+                    Some(self.connection_manager.form.username.clone())
+                },
+                if self.connection_manager.form.password.is_empty() {
+                    None
+                } else {
+                    Some(self.connection_manager.form.password.clone())
+                },
+                if self.connection_manager.form.host.is_empty() {
+                    None
+                } else {
+                    Some(self.connection_manager.form.host.clone())
+                },
+                if self.connection_manager.form.port.is_empty() {
+                    None
+                } else {
+                    Some(self.connection_manager.form.port.clone())
+                },
+                if self.connection_manager.form.database.is_empty() {
+                    None
+                } else {
+                    Some(self.connection_manager.form.database.clone())
+                },
             ),
         };
 
@@ -1220,7 +1343,11 @@ impl App {
         Ok(())
     }
 
-    fn build_connection_string_from_config(&self, conn: &crate::config::ConnectionConfig, db_type: &DatabaseType) -> String {
+    fn build_connection_string_from_config(
+        &self,
+        conn: &crate::config::ConnectionConfig,
+        db_type: &DatabaseType,
+    ) -> String {
         match db_type {
             DatabaseType::SQLite => conn.connection_string.clone(),
             DatabaseType::MySQL | DatabaseType::MariaDB => {
@@ -1229,9 +1356,9 @@ impl App {
                     DatabaseType::MariaDB => "mysql", // MariaDB uses mysql protocol
                     _ => unreachable!(),
                 };
-                
+
                 let mut url = format!("{}://", protocol);
-                
+
                 // Add username and password if provided
                 if let Some(username) = &conn.username {
                     url.push_str(username);
@@ -1241,18 +1368,18 @@ impl App {
                     }
                     url.push('@');
                 }
-                
+
                 // Add host
                 let host = conn.host.as_deref().unwrap_or("localhost");
                 url.push_str(host);
-                
+
                 // Add port if not default
                 let port = conn.port.as_deref().unwrap_or("3306");
                 if port != "3306" {
                     url.push(':');
                     url.push_str(port);
                 }
-                
+
                 // Add database if provided
                 if let Some(database) = &conn.database {
                     if !database.is_empty() {
@@ -1260,7 +1387,7 @@ impl App {
                         url.push_str(database);
                     }
                 }
-                
+
                 url
             }
         }
@@ -1268,13 +1395,17 @@ impl App {
 
     fn test_connection(&mut self, connection_string: &str, db_type: DatabaseType) -> Result<()> {
         let result: Result<Box<dyn DatabaseConnection>> = match db_type {
-            DatabaseType::SQLite => SQLiteConnection::connect(connection_string).map(|c| c as Box<dyn DatabaseConnection>),
-            DatabaseType::MySQL | DatabaseType::MariaDB => MySQLConnection::connect(connection_string),
+            DatabaseType::SQLite => SQLiteConnection::connect(connection_string)
+                .map(|c| c as Box<dyn DatabaseConnection>),
+            DatabaseType::MySQL | DatabaseType::MariaDB => {
+                MySQLConnection::connect(connection_string)
+            }
         };
 
         match result {
             Ok(_) => {
-                self.connection_manager.test_result = Some("✓ Success: Connection successful!".to_string());
+                self.connection_manager.test_result =
+                    Some("✓ Success: Connection successful!".to_string());
             }
             Err(e) => {
                 self.connection_manager.test_result = Some(format!("✗ Error: {}", e));
@@ -1335,7 +1466,10 @@ impl App {
         self.results_viewer.focused = self.active_pane == Pane::Results;
     }
 
-    fn get_column_info(conn: &mut Box<dyn DatabaseConnection>, table_name: &str) -> Result<Vec<crate::ui::results_viewer::ColumnInfo>> {
+    fn get_column_info(
+        conn: &mut Box<dyn DatabaseConnection>,
+        table_name: &str,
+    ) -> Result<Vec<crate::ui::results_viewer::ColumnInfo>> {
         use crate::ui::results_viewer::ColumnInfo;
         let mut columns = Vec::new();
 
@@ -1406,9 +1540,15 @@ impl App {
         Ok(columns)
     }
 
-    fn get_table_schema(conn: &mut Box<dyn DatabaseConnection>, table_name: &str) -> Result<String> {
+    fn get_table_schema(
+        conn: &mut Box<dyn DatabaseConnection>,
+        table_name: &str,
+    ) -> Result<String> {
         // Try to get CREATE TABLE statement
-        let query = format!("SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'", table_name);
+        let query = format!(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='{}'",
+            table_name
+        );
 
         match conn.execute_query(&query) {
             Ok(result) => {
@@ -1435,7 +1575,10 @@ impl App {
                             schema.push_str(");");
                             Ok(schema)
                         }
-                        Err(_) => Ok(format!("Table: {}\n\nSchema information not available", table_name)),
+                        Err(_) => Ok(format!(
+                            "Table: {}\n\nSchema information not available",
+                            table_name
+                        )),
                     }
                 }
             }
@@ -1447,16 +1590,25 @@ impl App {
                         if !result.rows.is_empty() && result.rows[0].len() >= 2 {
                             Ok(result.rows[0][1].clone())
                         } else {
-                            Ok(format!("Table: {}\n\nSchema information not available", table_name))
+                            Ok(format!(
+                                "Table: {}\n\nSchema information not available",
+                                table_name
+                            ))
                         }
                     }
-                    Err(_) => Ok(format!("Table: {}\n\nSchema information not available", table_name)),
+                    Err(_) => Ok(format!(
+                        "Table: {}\n\nSchema information not available",
+                        table_name
+                    )),
                 }
             }
         }
     }
 
-    fn get_table_indexes(conn: &mut Box<dyn DatabaseConnection>, table_name: &str) -> Result<Vec<String>> {
+    fn get_table_indexes(
+        conn: &mut Box<dyn DatabaseConnection>,
+        table_name: &str,
+    ) -> Result<Vec<String>> {
         let mut indexes = Vec::new();
 
         // Try SQLite first
@@ -1475,7 +1627,11 @@ impl App {
                                     columns.push(detail_row[2].clone());
                                 }
                             }
-                            indexes.push(format!("Index: {}\nColumns: {}", index_name, columns.join(", ")));
+                            indexes.push(format!(
+                                "Index: {}\nColumns: {}",
+                                index_name,
+                                columns.join(", ")
+                            ));
                         }
                     }
                 }
@@ -1485,16 +1641,24 @@ impl App {
                 // Try MySQL/MariaDB
                 let show_indexes = format!("SHOW INDEX FROM {}", table_name);
                 if let Ok(result) = conn.execute_query(&show_indexes) {
-                    let mut index_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+                    let mut index_map: std::collections::HashMap<String, Vec<String>> =
+                        std::collections::HashMap::new();
                     for row in &result.rows {
                         if row.len() >= 5 {
                             let index_name = &row[2];
                             let column_name = &row[4];
-                            index_map.entry(index_name.clone()).or_default().push(column_name.clone());
+                            index_map
+                                .entry(index_name.clone())
+                                .or_default()
+                                .push(column_name.clone());
                         }
                     }
                     for (index_name, columns) in index_map {
-                        indexes.push(format!("Index: {}\nColumns: {}", index_name, columns.join(", ")));
+                        indexes.push(format!(
+                            "Index: {}\nColumns: {}",
+                            index_name,
+                            columns.join(", ")
+                        ));
                     }
                     return Ok(indexes);
                 }
@@ -1519,9 +1683,13 @@ impl App {
         if let Some(conn_id) = self.database_browser.selected_connection {
             if let Some(conn) = self.connections.get_mut(&conn_id) {
                 // Group modifications by row (column)
-                let mut column_changes: std::collections::HashMap<usize, Vec<(usize, String)>> = std::collections::HashMap::new();
+                let mut column_changes: std::collections::HashMap<usize, Vec<(usize, String)>> =
+                    std::collections::HashMap::new();
                 for ((row, col), value) in &self.results_viewer.schema_modified_cells {
-                    column_changes.entry(*row).or_default().push((*col, value.clone()));
+                    column_changes
+                        .entry(*row)
+                        .or_default()
+                        .push((*col, value.clone()));
                 }
 
                 for (row_idx, changes) in column_changes {
@@ -1541,10 +1709,7 @@ impl App {
                         // Generate ALTER TABLE statement
                         let alter_query = format!(
                             "ALTER TABLE {} CHANGE COLUMN {} {} {}",
-                            table_name,
-                            column_info.name,
-                            new_name,
-                            new_type
+                            table_name, column_info.name, new_name, new_type
                         );
 
                         conn.execute_query(&alter_query)?;
@@ -1576,8 +1741,18 @@ impl App {
         // Save current field first
         self.results_viewer.save_schema_insert_field();
 
-        let column_name = self.results_viewer.schema_insert_row.get(&0).cloned().unwrap_or_default();
-        let data_type = self.results_viewer.schema_insert_row.get(&1).cloned().unwrap_or_default();
+        let column_name = self
+            .results_viewer
+            .schema_insert_row
+            .get(&0)
+            .cloned()
+            .unwrap_or_default();
+        let data_type = self
+            .results_viewer
+            .schema_insert_row
+            .get(&1)
+            .cloned()
+            .unwrap_or_default();
 
         if column_name.is_empty() || data_type.is_empty() {
             return Ok(()); // Need at least name and type
@@ -1587,7 +1762,10 @@ impl App {
         if let Some(conn_id) = self.database_browser.selected_connection {
             if let Some(conn) = self.connections.get_mut(&conn_id) {
                 // Build ALTER TABLE ADD COLUMN statement
-                let mut alter_query = format!("ALTER TABLE {} ADD COLUMN {} {}", table_name, column_name, data_type);
+                let mut alter_query = format!(
+                    "ALTER TABLE {} ADD COLUMN {} {}",
+                    table_name, column_name, data_type
+                );
 
                 // Add nullable constraint if specified
                 if let Some(nullable) = self.results_viewer.schema_insert_row.get(&2) {

@@ -46,12 +46,12 @@ impl DatabaseBrowser {
 
     pub fn set_tables(&mut self, tables: Vec<TableInfo>) {
         let has_tables = !tables.is_empty();
-        
+
         // Determine if we're viewing tables (have row counts) or databases (no row counts)
         self.viewing_tables = has_tables && tables.iter().any(|t| t.row_count.is_some());
-        
+
         self.tables = tables;
-        
+
         if has_tables && self.selected_table.is_none() {
             self.selected_table = Some(0);
             self.list_state.select(Some(0));
@@ -149,7 +149,8 @@ impl DatabaseBrowser {
     }
 
     pub fn get_selected_connection(&self) -> Option<&ConnectionInfo> {
-        self.selected_connection.and_then(|idx| self.connections.get(idx))
+        self.selected_connection
+            .and_then(|idx| self.connections.get(idx))
     }
 
     pub fn remove_connection(&mut self, id: usize) -> Option<ConnectionInfo> {
@@ -168,7 +169,11 @@ impl DatabaseBrowser {
         let total_items = self.connections.len() + self.tables.len();
         if total_items > 0 {
             let current = self.list_state.selected().unwrap_or(0);
-            let next = if current >= total_items { total_items - 1 } else { current };
+            let next = if current >= total_items {
+                total_items - 1
+            } else {
+                current
+            };
             self.list_state.select(Some(next));
             self.update_selection(next);
         } else {
@@ -221,7 +226,9 @@ impl DatabaseBrowser {
         let filtered_connections: Vec<usize> = if self.search_query.is_empty() {
             (0..self.connections.len()).collect()
         } else {
-            self.connections.iter().enumerate()
+            self.connections
+                .iter()
+                .enumerate()
                 .filter(|(_, conn)| conn.name.to_lowercase().contains(&search_lower))
                 .map(|(idx, _)| idx)
                 .collect()
@@ -231,7 +238,9 @@ impl DatabaseBrowser {
         let filtered_tables: Vec<usize> = if self.search_query.is_empty() {
             (0..self.tables.len()).collect()
         } else {
-            self.tables.iter().enumerate()
+            self.tables
+                .iter()
+                .enumerate()
                 .filter(|(_, table)| table.name.to_lowercase().contains(&search_lower))
                 .map(|(idx, _)| idx)
                 .collect()
@@ -242,7 +251,12 @@ impl DatabaseBrowser {
 
     fn get_total_filtered_items(&self) -> usize {
         let (conns, tables) = self.get_filtered_items();
-        conns.len() + if self.selected_connection.is_some() { tables.len() } else { 0 }
+        conns.len()
+            + if self.selected_connection.is_some() {
+                tables.len()
+            } else {
+                0
+            }
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -271,7 +285,9 @@ impl DatabaseBrowser {
         if self.selected_connection.is_some() {
             for table in &self.tables {
                 // Filter by search query if searching
-                if !self.search_query.is_empty() && !table.name.to_lowercase().contains(&search_lower) {
+                if !self.search_query.is_empty()
+                    && !table.name.to_lowercase().contains(&search_lower)
+                {
                     continue;
                 }
 
@@ -296,17 +312,25 @@ impl DatabaseBrowser {
         // Create title with navigation breadcrumbs and search indicator
         let title = if self.search_mode {
             let filtered_count = self.get_total_filtered_items();
-            format!(" Search: {} ({} matches) ", self.search_query, filtered_count)
+            format!(
+                " Search: {} ({} matches) ",
+                self.search_query, filtered_count
+            )
         } else if !self.search_query.is_empty() {
             let filtered_count = self.get_total_filtered_items();
-            format!(" Databases (Filtered: {} - {} matches) - Press / to search, ESC to clear ",
-                self.search_query, filtered_count)
+            format!(
+                " Databases (Filtered: {} - {} matches) - Press / to search, ESC to clear ",
+                self.search_query, filtered_count
+            )
         } else if self.viewing_tables && self.current_database.is_some() {
-            format!(" {} > {} (Press ESC to go back, / to search) ",
-                self.connections.get(self.selected_connection.unwrap_or(0))
+            format!(
+                " {} > {} (Press ESC to go back, / to search) ",
+                self.connections
+                    .get(self.selected_connection.unwrap_or(0))
                     .map(|c| c.name.as_str())
                     .unwrap_or("Connection"),
-                self.current_database.as_ref().unwrap())
+                self.current_database.as_ref().unwrap()
+            )
         } else {
             " Databases (Press / to search) ".to_string()
         };

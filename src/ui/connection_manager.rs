@@ -21,11 +21,11 @@ pub enum FormField {
     Name,
     Type,
     ConnectionString, // For SQLite file path
-    Username,        // For MySQL/MariaDB
-    Password,        // For MySQL/MariaDB
-    Host,           // For MySQL/MariaDB
-    Port,           // For MySQL/MariaDB
-    Database,       // For MySQL/MariaDB (optional)
+    Username,         // For MySQL/MariaDB
+    Password,         // For MySQL/MariaDB
+    Host,             // For MySQL/MariaDB
+    Port,             // For MySQL/MariaDB
+    Database,         // For MySQL/MariaDB (optional)
 }
 
 #[derive(Debug, Clone)]
@@ -35,9 +35,9 @@ pub struct ConnectionForm {
     pub connection_string: String, // Used for SQLite file path
     pub username: String,          // For MySQL/MariaDB
     pub password: String,          // For MySQL/MariaDB
-    pub host: String,             // For MySQL/MariaDB
-    pub port: String,             // For MySQL/MariaDB
-    pub database: String,         // For MySQL/MariaDB (optional)
+    pub host: String,              // For MySQL/MariaDB
+    pub port: String,              // For MySQL/MariaDB
+    pub database: String,          // For MySQL/MariaDB (optional)
     pub active_field: FormField,
 }
 
@@ -96,7 +96,13 @@ impl ConnectionManager {
         self.test_result = None;
     }
 
-    pub fn show_edit_form(&mut self, index: usize, name: String, db_type: DatabaseType, connection_string: String) {
+    pub fn show_edit_form(
+        &mut self,
+        index: usize,
+        name: String,
+        db_type: DatabaseType,
+        connection_string: String,
+    ) {
         self.mode = ConnectionManagerMode::Edit(index);
         self.form = ConnectionForm {
             name,
@@ -109,17 +115,28 @@ impl ConnectionManager {
             database: String::new(),
             active_field: FormField::Name,
         };
-        
+
         // Parse connection string for MySQL/MariaDB to populate individual fields
         if matches!(db_type, DatabaseType::MySQL | DatabaseType::MariaDB) {
             self.parse_connection_string(&connection_string);
         }
-        
+
         self.test_result = None;
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn show_edit_form_detailed(&mut self, index: usize, name: String, db_type: DatabaseType, connection_string: String, username: Option<String>, password: Option<String>, host: Option<String>, port: Option<String>, database: Option<String>) {
+    pub fn show_edit_form_detailed(
+        &mut self,
+        index: usize,
+        name: String,
+        db_type: DatabaseType,
+        connection_string: String,
+        username: Option<String>,
+        password: Option<String>,
+        host: Option<String>,
+        port: Option<String>,
+        database: Option<String>,
+    ) {
         self.mode = ConnectionManagerMode::Edit(index);
         self.form = ConnectionForm {
             name,
@@ -132,7 +149,7 @@ impl ConnectionManager {
             database: database.unwrap_or_default(),
             active_field: FormField::Name,
         };
-        
+
         self.test_result = None;
     }
 
@@ -140,7 +157,7 @@ impl ConnectionManager {
         // Parse MySQL connection string: mysql://user:pass@host:port/database
         if let Some(stripped) = connection_string.strip_prefix("mysql://") {
             let mut parts = stripped.splitn(2, '@');
-            
+
             if let Some(credentials) = parts.next() {
                 let mut cred_parts = credentials.splitn(2, ':');
                 if let Some(username) = cred_parts.next() {
@@ -150,7 +167,7 @@ impl ConnectionManager {
                     }
                 }
             }
-            
+
             if let Some(host_db) = parts.next() {
                 let mut host_db_parts = host_db.splitn(2, '/');
                 if let Some(host_port) = host_db_parts.next() {
@@ -162,7 +179,7 @@ impl ConnectionManager {
                         }
                     }
                 }
-                
+
                 if let Some(database) = host_db_parts.next() {
                     self.form.database = database.to_string();
                 }
@@ -232,22 +249,36 @@ impl ConnectionManager {
                 if c.is_ascii_digit() {
                     self.form.port.push(c);
                 }
-            },
+            }
             FormField::Database => self.form.database.push(c),
-            FormField::Type => {}, // Type is cycled, not typed
+            FormField::Type => {} // Type is cycled, not typed
         }
     }
 
     pub fn delete_char(&mut self) {
         match self.form.active_field {
-            FormField::Name => { self.form.name.pop(); },
-            FormField::ConnectionString => { self.form.connection_string.pop(); },
-            FormField::Username => { self.form.username.pop(); },
-            FormField::Password => { self.form.password.pop(); },
-            FormField::Host => { self.form.host.pop(); },
-            FormField::Port => { self.form.port.pop(); },
-            FormField::Database => { self.form.database.pop(); },
-            FormField::Type => {},
+            FormField::Name => {
+                self.form.name.pop();
+            }
+            FormField::ConnectionString => {
+                self.form.connection_string.pop();
+            }
+            FormField::Username => {
+                self.form.username.pop();
+            }
+            FormField::Password => {
+                self.form.password.pop();
+            }
+            FormField::Host => {
+                self.form.host.pop();
+            }
+            FormField::Port => {
+                self.form.port.pop();
+            }
+            FormField::Database => {
+                self.form.database.pop();
+            }
+            FormField::Type => {}
         }
     }
 
@@ -274,9 +305,9 @@ impl ConnectionManager {
                     DatabaseType::MariaDB => "mysql", // MariaDB uses mysql protocol
                     _ => unreachable!(),
                 };
-                
+
                 let mut url = format!("{}://", protocol);
-                
+
                 // Add username and password if provided
                 if !self.form.username.is_empty() {
                     url.push_str(&self.form.username);
@@ -286,30 +317,43 @@ impl ConnectionManager {
                     }
                     url.push('@');
                 }
-                
+
                 // Add host
-                let host = if self.form.host.is_empty() { "localhost" } else { &self.form.host };
+                let host = if self.form.host.is_empty() {
+                    "localhost"
+                } else {
+                    &self.form.host
+                };
                 url.push_str(host);
-                
+
                 // Add port if not default
-                let port = if self.form.port.is_empty() { "3306" } else { &self.form.port };
+                let port = if self.form.port.is_empty() {
+                    "3306"
+                } else {
+                    &self.form.port
+                };
                 if port != "3306" {
                     url.push(':');
                     url.push_str(port);
                 }
-                
+
                 // Add database if provided
                 if !self.form.database.is_empty() {
                     url.push('/');
                     url.push_str(&self.form.database);
                 }
-                
+
                 url
             }
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, connections: &[(String, String, String)]) {
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        connections: &[(String, String, String)],
+    ) {
         if !self.visible {
             return;
         }
@@ -323,12 +367,19 @@ impl ConnectionManager {
         match &self.mode {
             ConnectionManagerMode::List => self.render_list(frame, popup_area, connections),
             ConnectionManagerMode::Add => self.render_form(frame, popup_area, "Add Connection"),
-            ConnectionManagerMode::Edit(_) => self.render_form(frame, popup_area, "Edit Connection"),
+            ConnectionManagerMode::Edit(_) => {
+                self.render_form(frame, popup_area, "Edit Connection")
+            }
             ConnectionManagerMode::Test => self.render_test_result(frame, popup_area),
         }
     }
 
-    fn render_list(&mut self, frame: &mut Frame, area: Rect, connections: &[(String, String, String)]) {
+    fn render_list(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        connections: &[(String, String, String)],
+    ) {
         let block = Block::default()
             .title(" Connection Manager ")
             .borders(Borders::ALL)
@@ -339,10 +390,7 @@ impl ConnectionManager {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(5),
-                Constraint::Length(3),
-            ])
+            .constraints([Constraint::Min(5), Constraint::Length(3)])
             .split(inner);
 
         // Connection list
@@ -350,22 +398,29 @@ impl ConnectionManager {
             .iter()
             .map(|(name, db_type, _)| {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("[{}] ", db_type), Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        format!("[{}] ", db_type),
+                        Style::default().fg(Color::Yellow),
+                    ),
                     Span::raw(name),
                 ]))
             })
             .collect();
 
         let list = List::new(items)
-            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD))
+            .highlight_style(
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            )
             .highlight_symbol("► ");
 
         frame.render_stateful_widget(list, chunks[0], &mut self.list_state);
 
         // Help text
-        let help = Paragraph::new(vec![
-            Line::from("n: New  e: Edit  d: Delete  t: Test  Enter: Connect  Esc: Close"),
-        ])
+        let help = Paragraph::new(vec![Line::from(
+            "n: New  e: Edit  d: Delete  t: Test  Enter: Connect  Esc: Close",
+        )])
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
 
@@ -402,7 +457,9 @@ impl ConnectionManager {
 
         // Name field
         let name_style = if self.form.active_field == FormField::Name {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -415,7 +472,9 @@ impl ConnectionManager {
 
         // Type field
         let type_style = if self.form.active_field == FormField::Type {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -428,7 +487,9 @@ impl ConnectionManager {
 
         // File Path field
         let path_style = if self.form.active_field == FormField::ConnectionString {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -482,7 +543,9 @@ impl ConnectionManager {
 
         // Name field
         let name_style = if self.form.active_field == FormField::Name {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -495,7 +558,9 @@ impl ConnectionManager {
 
         // Type field
         let type_style = if self.form.active_field == FormField::Type {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -518,7 +583,9 @@ impl ConnectionManager {
             .split(chunks[2]);
 
         let host_style = if self.form.active_field == FormField::Host {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -530,7 +597,9 @@ impl ConnectionManager {
         frame.render_widget(host_text, host_port_chunks[0]);
 
         let port_style = if self.form.active_field == FormField::Port {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -548,7 +617,9 @@ impl ConnectionManager {
             .split(chunks[3]);
 
         let username_style = if self.form.active_field == FormField::Username {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -560,7 +631,9 @@ impl ConnectionManager {
         frame.render_widget(username_text, user_pass_chunks[0]);
 
         let password_style = if self.form.active_field == FormField::Password {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };
@@ -575,7 +648,9 @@ impl ConnectionManager {
 
         // Database field
         let database_style = if self.form.active_field == FormField::Database {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         };

@@ -14,9 +14,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Top bar
-            Constraint::Min(0),     // Content
-            Constraint::Length(3),  // Status bar
+            Constraint::Length(3), // Top bar
+            Constraint::Min(0),    // Content
+            Constraint::Length(3), // Status bar
         ])
         .split(size);
 
@@ -54,9 +54,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_status_bar(frame, chunks[2], app);
 
     // Render connection manager popup (if visible)
-    let connections: Vec<(String, String, String)> = app.config.get_connections()
+    let connections: Vec<(String, String, String)> = app
+        .config
+        .get_connections()
         .iter()
-        .map(|c| (c.name.clone(), c.db_type.clone(), c.connection_string.clone()))
+        .map(|c| {
+            (
+                c.name.clone(),
+                c.db_type.clone(),
+                c.connection_string.clone(),
+            )
+        })
         .collect();
     app.connection_manager.render(frame, size, &connections);
 }
