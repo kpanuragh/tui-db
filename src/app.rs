@@ -221,64 +221,57 @@ impl App {
         }
 
         // Handle Ctrl+D for discard changes
-        if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            if self.active_pane == Pane::Results && self.results_viewer.has_any_changes() {
-                if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
-                    self.results_viewer.discard_schema_changes();
-                } else {
-                    self.results_viewer.discard_all_changes();
-                }
-                self.vim_state.enter_normal_mode();
-                return Ok(());
+        if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.active_pane == Pane::Results && self.results_viewer.has_any_changes() {
+            if self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
+                self.results_viewer.discard_schema_changes();
+            } else {
+                self.results_viewer.discard_all_changes();
             }
+            self.vim_state.enter_normal_mode();
+            return Ok(());
         }
 
         // Handle schema tab edit/insert mode key input
-        if self.active_pane == Pane::Results && self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema {
-            if self.results_viewer.schema_edit_mode || self.results_viewer.schema_insert_mode {
-                match key.code {
-                    KeyCode::Esc => {
-                        if self.results_viewer.schema_edit_mode {
-                            self.results_viewer.exit_schema_edit_mode();
-                        } else {
-                            self.results_viewer.exit_schema_insert_mode();
-                        }
-                        return Ok(());
+        if self.active_pane == Pane::Results && self.results_viewer.active_tab == crate::ui::results_viewer::TabMode::Schema
+            && (self.results_viewer.schema_edit_mode || self.results_viewer.schema_insert_mode) {
+            match key.code {
+                KeyCode::Esc => {
+                    if self.results_viewer.schema_edit_mode {
+                        self.results_viewer.exit_schema_edit_mode();
+                    } else {
+                        self.results_viewer.exit_schema_insert_mode();
                     }
-                    KeyCode::Left | KeyCode::Char('h') => {
-                        self.results_viewer.schema_move_column_left();
-                        return Ok(());
-                    }
-                    KeyCode::Right | KeyCode::Char('l') => {
-                        self.results_viewer.schema_move_column_right();
-                        return Ok(());
-                    }
-                    KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        match c {
-                            's' => {
-                                // Save schema changes
-                                if self.results_viewer.schema_insert_mode {
-                                    self.save_schema_insert_column()?;
-                                } else {
-                                    self.save_schema_edits()?;
-                                }
-                                return Ok(());
-                            }
-                            _ => {}
-                        }
-                    }
-                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.results_viewer.schema_insert_char(c);
-                        return Ok(());
-                    }
-                    KeyCode::Backspace => {
-                        self.results_viewer.schema_backspace();
-                        return Ok(());
-                    }
-                    _ => {}
+                    return Ok(());
                 }
-                return Ok(());
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.results_viewer.schema_move_column_left();
+                    return Ok(());
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.results_viewer.schema_move_column_right();
+                    return Ok(());
+                }
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Save schema changes
+                    if self.results_viewer.schema_insert_mode {
+                        self.save_schema_insert_column()?;
+                    } else {
+                        self.save_schema_edits()?;
+                    }
+                    return Ok(());
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.results_viewer.schema_insert_char(c);
+                    return Ok(());
+                }
+                KeyCode::Backspace => {
+                    self.results_viewer.schema_backspace();
+                    return Ok(());
+                }
+                _ => {}
             }
+            return Ok(());
         }
 
         // Normal key handling when connection manager is not visible
@@ -502,9 +495,7 @@ impl App {
                 if self.vim_state.mode == VimMode::Insert {
                     if self.active_pane == Pane::QueryEditor {
                         self.query_editor.insert_char(c);
-                    } else if self.active_pane == Pane::Results && self.results_viewer.edit_mode {
-                        self.results_viewer.edit_insert_char(c);
-                    } else if self.active_pane == Pane::Results && self.results_viewer.insert_mode {
+                    } else if self.active_pane == Pane::Results && (self.results_viewer.edit_mode || self.results_viewer.insert_mode) {
                         self.results_viewer.edit_insert_char(c);
                     }
                 }
@@ -519,9 +510,7 @@ impl App {
                 if self.vim_state.mode == VimMode::Insert {
                     if self.active_pane == Pane::QueryEditor {
                         self.query_editor.backspace();
-                    } else if self.active_pane == Pane::Results && self.results_viewer.edit_mode {
-                        self.results_viewer.edit_backspace();
-                    } else if self.active_pane == Pane::Results && self.results_viewer.insert_mode {
+                    } else if self.active_pane == Pane::Results && (self.results_viewer.edit_mode || self.results_viewer.insert_mode) {
                         self.results_viewer.edit_backspace();
                     }
                 }
@@ -622,7 +611,7 @@ impl App {
     }
 
     fn execute_command(&mut self, cmd: &str) -> Result<()> {
-        let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
         if parts.is_empty() {
             return Ok(());
         }
@@ -723,14 +712,14 @@ impl App {
             },
             DatabaseType::MySQL => {
                 // Extract database name from connection string if possible
-                if let Some(db_name) = connection_string.split('/').last() {
+                if let Some(db_name) = connection_string.split('/').next_back() {
                     format!("MySQL: {}", db_name.split('?').next().unwrap_or(db_name))
                 } else {
                     format!("MySQL Connection {}", id)
                 }
             },
             DatabaseType::MariaDB => {
-                if let Some(db_name) = connection_string.split('/').last() {
+                if let Some(db_name) = connection_string.split('/').next_back() {
                     format!("MariaDB: {}", db_name.split('?').next().unwrap_or(db_name))
                 } else {
                     format!("MariaDB Connection {}", id)
@@ -1380,39 +1369,36 @@ impl App {
             Err(_) => {
                 // Try MySQL/MariaDB DESCRIBE
                 let describe_query = format!("DESCRIBE {}", table_name);
-                match conn.execute_query(&describe_query) {
-                    Ok(result) => {
-                        // DESCRIBE returns: Field, Type, Null, Key, Default, Extra
-                        for row in &result.rows {
-                            if row.len() >= 6 {
-                                let name = row[0].clone();
-                                let data_type = row[1].clone();
-                                let nullable = row[2].clone();
-                                let key = &row[3];
-                                let default_value = row[4].clone();
-                                let extra_val = row[5].clone();
+                if let Ok(result) = conn.execute_query(&describe_query) {
+                    // DESCRIBE returns: Field, Type, Null, Key, Default, Extra
+                    for row in &result.rows {
+                        if row.len() >= 6 {
+                            let name = row[0].clone();
+                            let data_type = row[1].clone();
+                            let nullable = row[2].clone();
+                            let key = &row[3];
+                            let default_value = row[4].clone();
+                            let extra_val = row[5].clone();
 
-                                let mut extra = extra_val.clone();
-                                if key == "PRI" {
-                                    extra = if extra.is_empty() {
-                                        "PRIMARY KEY".to_string()
-                                    } else {
-                                        format!("PRIMARY KEY, {}", extra)
-                                    };
-                                }
-
-                                columns.push(ColumnInfo {
-                                    name,
-                                    data_type,
-                                    nullable,
-                                    default_value,
-                                    extra,
-                                });
+                            let mut extra = extra_val.clone();
+                            if key == "PRI" {
+                                extra = if extra.is_empty() {
+                                    "PRIMARY KEY".to_string()
+                                } else {
+                                    format!("PRIMARY KEY, {}", extra)
+                                };
                             }
+
+                            columns.push(ColumnInfo {
+                                name,
+                                data_type,
+                                nullable,
+                                default_value,
+                                extra,
+                            });
                         }
-                        return Ok(columns);
                     }
-                    Err(_) => {}
+                    return Ok(columns);
                 }
             }
         }
@@ -1442,7 +1428,7 @@ impl App {
                                     if i < info_result.rows.len() - 1 {
                                         schema.push_str(",\n");
                                     } else {
-                                        schema.push_str("\n");
+                                        schema.push('\n');
                                     }
                                 }
                             }
@@ -1498,22 +1484,19 @@ impl App {
             Err(_) => {
                 // Try MySQL/MariaDB
                 let show_indexes = format!("SHOW INDEX FROM {}", table_name);
-                match conn.execute_query(&show_indexes) {
-                    Ok(result) => {
-                        let mut index_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-                        for row in &result.rows {
-                            if row.len() >= 5 {
-                                let index_name = &row[2];
-                                let column_name = &row[4];
-                                index_map.entry(index_name.clone()).or_insert_with(Vec::new).push(column_name.clone());
-                            }
+                if let Ok(result) = conn.execute_query(&show_indexes) {
+                    let mut index_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+                    for row in &result.rows {
+                        if row.len() >= 5 {
+                            let index_name = &row[2];
+                            let column_name = &row[4];
+                            index_map.entry(index_name.clone()).or_default().push(column_name.clone());
                         }
-                        for (index_name, columns) in index_map {
-                            indexes.push(format!("Index: {}\nColumns: {}", index_name, columns.join(", ")));
-                        }
-                        return Ok(indexes);
                     }
-                    Err(_) => {}
+                    for (index_name, columns) in index_map {
+                        indexes.push(format!("Index: {}\nColumns: {}", index_name, columns.join(", ")));
+                    }
+                    return Ok(indexes);
                 }
             }
         }
@@ -1538,7 +1521,7 @@ impl App {
                 // Group modifications by row (column)
                 let mut column_changes: std::collections::HashMap<usize, Vec<(usize, String)>> = std::collections::HashMap::new();
                 for ((row, col), value) in &self.results_viewer.schema_modified_cells {
-                    column_changes.entry(*row).or_insert_with(Vec::new).push((*col, value.clone()));
+                    column_changes.entry(*row).or_default().push((*col, value.clone()));
                 }
 
                 for (row_idx, changes) in column_changes {

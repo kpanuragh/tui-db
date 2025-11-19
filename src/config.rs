@@ -23,17 +23,9 @@ pub struct ConnectionConfig {
     pub database: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Config {
     pub connections: Vec<ConnectionConfig>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            connections: Vec::new(),
-        }
-    }
 }
 
 impl Config {
@@ -79,6 +71,7 @@ impl Config {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_connection_detailed(&mut self, name: String, connection_string: String, db_type: String, username: Option<String>, password: Option<String>, host: Option<String>, port: Option<String>, database: Option<String>) {
         // Check if connection already exists, don't add duplicates
         if !self.connections.iter().any(|c| c.name == name && c.connection_string == connection_string) {

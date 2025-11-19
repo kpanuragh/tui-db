@@ -128,7 +128,7 @@ impl DatabaseConnection for MySQLConnection {
                                                 format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hour, min, sec)
                                             }
                                         }
-                                        mysql::Value::Time(negative, days, hours, minutes, seconds, microseconds) => {
+                                        mysql::Value::Time(negative, days, hours, minutes, seconds, _microseconds) => {
                                             let sign = if negative { "-" } else { "" };
                                             if days > 0 {
                                                 format!("{}{:02}:{:02}:{:02}", sign, days * 24 + hours as u32, minutes, seconds)
@@ -186,10 +186,7 @@ impl DatabaseConnection for MySQLConnection {
 
                     // Get row count for each table, with error handling
                     let count_query = format!("SELECT COUNT(*) FROM `{}`", table_name);
-                    let count: Option<u64> = match self.conn.query_first(&count_query) {
-                        Ok(c) => c,
-                        Err(_) => None, // If we can't get count, just show None
-                    };
+                    let count: Option<u64> = self.conn.query_first(&count_query).unwrap_or_default();
 
                     tables.push(TableInfo {
                         name: table_name,

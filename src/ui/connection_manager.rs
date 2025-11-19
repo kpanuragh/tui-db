@@ -12,6 +12,7 @@ pub enum ConnectionManagerMode {
     List,
     Add,
     Edit(usize), // editing connection at index
+    #[allow(dead_code)]
     Test,
 }
 
@@ -117,6 +118,7 @@ impl ConnectionManager {
         self.test_result = None;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn show_edit_form_detailed(&mut self, index: usize, name: String, db_type: DatabaseType, connection_string: String, username: Option<String>, password: Option<String>, host: Option<String>, port: Option<String>, database: Option<String>) {
         self.mode = ConnectionManagerMode::Edit(index);
         self.form = ConnectionForm {

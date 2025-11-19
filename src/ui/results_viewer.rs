@@ -3,7 +3,6 @@ use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Cell, Row, Table, TableState, Paragraph, Tabs},
-    text::{Line, Span},
     Frame,
 };
 use std::collections::HashMap;
@@ -143,6 +142,7 @@ impl ResultsViewer {
     }
 
     // Horizontal scrolling methods
+    #[allow(dead_code)]
     pub fn scroll_left(&mut self) {
         self.clear_status_message();
         if self.horizontal_scroll > 0 {
@@ -150,6 +150,7 @@ impl ResultsViewer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn scroll_right(&mut self) {
         self.clear_status_message();
         if let Some(ref result) = self.result {
@@ -160,11 +161,13 @@ impl ResultsViewer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn scroll_page_left(&mut self) {
         let scroll_amount = (self.visible_columns / 2).max(1);
         self.horizontal_scroll = self.horizontal_scroll.saturating_sub(scroll_amount);
     }
 
+    #[allow(dead_code)]
     pub fn scroll_page_right(&mut self) {
         if let Some(ref result) = self.result {
             let max_scroll = result.columns.len().saturating_sub(self.visible_columns);
@@ -173,10 +176,12 @@ impl ResultsViewer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn goto_first_column(&mut self) {
         self.horizontal_scroll = 0;
     }
 
+    #[allow(dead_code)]
     pub fn goto_last_column(&mut self) {
         if let Some(ref result) = self.result {
             let max_scroll = result.columns.len().saturating_sub(self.visible_columns);
@@ -310,7 +315,7 @@ impl ResultsViewer {
         // Group modifications by row
         let mut rows_to_update: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
         for ((row, col), value) in &self.modified_cells {
-            rows_to_update.entry(*row).or_insert_with(Vec::new).push((*col, value.clone()));
+            rows_to_update.entry(*row).or_default().push((*col, value.clone()));
         }
 
         // Generate UPDATE query for each modified row
@@ -558,7 +563,7 @@ impl ResultsViewer {
             Style::default().fg(Color::DarkGray)
         };
 
-        if let Some(ref result) = self.result {
+        if let Some(ref _result) = self.result {
             // Split area into tabs and content
             let chunks = Layout::default()
                 .direction(Direction::Vertical)

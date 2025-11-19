@@ -23,6 +23,7 @@ impl VimMode {
 pub struct VimState {
     pub mode: VimMode,
     pub command_buffer: String,
+    #[allow(dead_code)]
     pub register: Option<String>,
     pub count: Option<usize>,
 }
@@ -79,6 +80,7 @@ impl VimState {
         &self.command_buffer
     }
 
+    #[allow(dead_code)]
     pub fn clear_command(&mut self) {
         self.command_buffer.clear();
     }
@@ -337,30 +339,44 @@ pub enum VimCommand {
 
     // Edit Mode
     EnterEditMode,
+    #[allow(dead_code)]
     ExitEditMode,
+    #[allow(dead_code)]
     MoveColumnLeft,
+    #[allow(dead_code)]
     MoveColumnRight,
+    #[allow(dead_code)]
     SaveCellEdit,
     SaveAllEdits,
 
     // Insert Mode
+    #[allow(dead_code)]
     EnterInsertRowMode,
+    #[allow(dead_code)]
     ExitInsertRowMode,
+    #[allow(dead_code)]
     SaveInsertField,
+    #[allow(dead_code)]
     SaveInsertRow,
 
     // Connection Management
     DeleteConnection,
     OpenConnectionManager,
+    #[allow(dead_code)]
     CloseConnectionManager,
+    #[allow(dead_code)]
     ConnectionManagerAction(char),  // n, e, d, t, Enter
 
     // Results Viewer Tabs
+    #[allow(dead_code)]
     SwitchToDataTab,
+    #[allow(dead_code)]
     SwitchToSchemaTab,
+    #[allow(dead_code)]
     SwitchToIndexesTab,
 
     // Data Management
+    #[allow(dead_code)]
     DiscardChanges,
     RefreshData,
     CopyCellValue,
