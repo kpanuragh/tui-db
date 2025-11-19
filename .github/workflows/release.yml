@@ -17,7 +17,7 @@ jobs:
       matrix:
         include:
           # Linux x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             artifact_name: tui-db
             asset_name: tui-db-linux-x86_64
