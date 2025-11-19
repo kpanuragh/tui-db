@@ -162,7 +162,14 @@ impl VimState {
             KeyCode::Char('X') => Some(VimCommand::DeleteConnection),
             KeyCode::Char('C') => Some(VimCommand::OpenConnectionManager),
             KeyCode::Char('d') => Some(VimCommand::Delete),
-            KeyCode::Char('y') => Some(VimCommand::Yank),
+            KeyCode::Char('y') if matches!(self.command_buffer.chars().last(), Some('y')) => {
+                self.command_buffer.clear();
+                Some(VimCommand::CopyCellValue)
+            }
+            KeyCode::Char('y') => {
+                self.command_buffer.push('y');
+                Some(VimCommand::Yank)
+            }
             KeyCode::Char('p') => Some(VimCommand::Paste),
             KeyCode::Char('u') => Some(VimCommand::Undo),
             KeyCode::Char('r') => Some(VimCommand::Redo),
@@ -356,6 +363,7 @@ pub enum VimCommand {
     // Data Management
     DiscardChanges,
     RefreshData,
+    CopyCellValue,
 
     // Commands
     ExecuteCommand(String),

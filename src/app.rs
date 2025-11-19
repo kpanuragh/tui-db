@@ -1,7 +1,11 @@
 use anyhow::Result;
+use arboard::Clipboard;
 use crossterm::event::{self, Event, KeyEvent};
 use std::collections::HashMap;
 use std::time::Duration;
+
+#[cfg(target_os = "linux")]
+use arboard::SetExtLinux;
 
 use crate::config::Config;
 use crate::db::{sqlite::SQLiteConnection, mysql::MySQLConnection, ConnectionInfo, DatabaseConnection, DatabaseType};
@@ -27,11 +31,16 @@ pub struct App {
     pub connections: HashMap<usize, Box<dyn DatabaseConnection>>,
     pub next_connection_id: usize,
     pub clipboard: Option<String>,
+    pub system_clipboard: Option<Clipboard>,
 }
 
 impl App {
     pub fn new() -> Result<Self> {
         let config = Config::load().unwrap_or_default();
+
+        // Initialize system clipboard - keep it alive for the duration of the app
+        let system_clipboard = Clipboard::new().ok();
+
         let mut app = Self {
             should_quit: false,
             vim_state: VimState::new(),
@@ -44,6 +53,7 @@ impl App {
             connections: HashMap::new(),
             next_connection_id: 0,
             clipboard: None,
+            system_clipboard,
         };
 
         // Update focused states
@@ -156,6 +166,15 @@ impl App {
                 }
                 KeyCode::Backspace => {
                     self.database_browser.search_backspace();
+                    return Ok(());
+                }
+                // Allow navigation keys (j/k, up/down) while in search mode
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.database_browser.move_down();
+                    return Ok(());
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.database_browser.move_up();
                     return Ok(());
                 }
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -433,9 +452,9 @@ impl App {
                         self.results_viewer.move_column_left();
                     }
                 } else if self.active_pane == Pane::Results {
-                    // Horizontal scrolling when not in edit mode
+                    // Move selected column left when not in edit mode
                     for _ in 0..count {
-                        self.results_viewer.scroll_left();
+                        self.results_viewer.move_column_left();
                     }
                 }
             }
@@ -453,9 +472,9 @@ impl App {
                         self.results_viewer.move_column_right();
                     }
                 } else if self.active_pane == Pane::Results {
-                    // Horizontal scrolling when not in edit mode
+                    // Move selected column right when not in edit mode
                     for _ in 0..count {
-                        self.results_viewer.scroll_right();
+                        self.results_viewer.move_column_right();
                     }
                 }
             }
@@ -558,6 +577,41 @@ impl App {
                         if let Some(conn) = self.connections.get_mut(&conn_id) {
                             let tables = conn.list_tables()?;
                             self.database_browser.set_tables(tables);
+                        }
+                    }
+                }
+            }
+            VimCommand::CopyCellValue => {
+                if self.active_pane == Pane::Results {
+                    if let Some(value) = self.results_viewer.get_current_cell_value() {
+                        // Copy to internal clipboard
+                        self.clipboard = Some(value.clone());
+
+                        // Copy to system clipboard using the persistent instance
+                        if let Some(clipboard) = &mut self.system_clipboard {
+                            #[cfg(target_os = "linux")]
+                            let result = clipboard.set()
+                                .wait()
+                                .text(&value);
+
+                            #[cfg(not(target_os = "linux"))]
+                            let result = clipboard.set_text(&value);
+
+                            match result {
+                                Ok(_) => {
+                                    self.results_viewer.set_status_message(format!("Copied to clipboard: {}",
+                                        if value.len() > 50 {
+                                            format!("{}...", &value[..50])
+                                        } else {
+                                            value
+                                        }));
+                                }
+                                Err(e) => {
+                                    self.results_viewer.set_status_message(format!("Copy failed: {}", e));
+                                }
+                            }
+                        } else {
+                            self.results_viewer.set_status_message("Clipboard not available".to_string());
                         }
                     }
                 }

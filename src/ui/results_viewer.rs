@@ -50,6 +50,7 @@ pub struct ResultsViewer {
     pub schema_edit_buffer: String,
     pub schema_modified_cells: HashMap<(usize, usize), String>, // (row, col) -> new value
     pub schema_insert_row: HashMap<usize, String>, // For new column
+    pub status_message: Option<String>, // Temporary status message (e.g., "Copied!")
 }
 
 impl ResultsViewer {
@@ -85,6 +86,7 @@ impl ResultsViewer {
             schema_edit_buffer: String::new(),
             schema_modified_cells: HashMap::new(),
             schema_insert_row: HashMap::new(),
+            status_message: None,
         }
     }
 
@@ -102,6 +104,7 @@ impl ResultsViewer {
     }
 
     pub fn move_up(&mut self, count: usize) {
+        self.clear_status_message();
         if let Some(ref result) = self.result {
             if result.rows.is_empty() {
                 return;
@@ -114,6 +117,7 @@ impl ResultsViewer {
     }
 
     pub fn move_down(&mut self, count: usize) {
+        self.clear_status_message();
         if let Some(ref result) = self.result {
             if result.rows.is_empty() {
                 return;
@@ -140,12 +144,14 @@ impl ResultsViewer {
 
     // Horizontal scrolling methods
     pub fn scroll_left(&mut self) {
+        self.clear_status_message();
         if self.horizontal_scroll > 0 {
             self.horizontal_scroll -= 1;
         }
     }
 
     pub fn scroll_right(&mut self) {
+        self.clear_status_message();
         if let Some(ref result) = self.result {
             let max_scroll = result.columns.len().saturating_sub(self.visible_columns);
             if self.horizontal_scroll < max_scroll {
@@ -213,6 +219,10 @@ impl ResultsViewer {
     pub fn move_column_left(&mut self) {
         if self.selected_column > 0 {
             self.selected_column -= 1;
+            // Auto-scroll if selected column goes off screen to the left
+            if self.selected_column < self.horizontal_scroll {
+                self.horizontal_scroll = self.selected_column;
+            }
             if self.insert_mode {
                 // Load insert row value if it exists
                 self.edit_buffer = self.insert_row.get(&self.selected_column).cloned().unwrap_or_default();
@@ -226,6 +236,11 @@ impl ResultsViewer {
         if let Some(ref result) = self.result {
             if self.selected_column < result.columns.len().saturating_sub(1) {
                 self.selected_column += 1;
+                // Auto-scroll if selected column goes off screen to the right
+                let visible_end = self.horizontal_scroll + self.visible_columns;
+                if self.selected_column >= visible_end {
+                    self.horizontal_scroll = self.selected_column.saturating_sub(self.visible_columns - 1);
+                }
                 if self.insert_mode {
                     // Load insert row value if it exists
                     self.edit_buffer = self.insert_row.get(&self.selected_column).cloned().unwrap_or_default();
@@ -265,6 +280,14 @@ impl ResultsViewer {
 
     pub fn set_table_name(&mut self, name: String) {
         self.table_name = Some(name);
+    }
+
+    pub fn set_status_message(&mut self, message: String) {
+        self.status_message = Some(message);
+    }
+
+    pub fn clear_status_message(&mut self) {
+        self.status_message = None;
     }
 
     pub fn has_modifications(&self) -> bool {
@@ -589,12 +612,23 @@ impl ResultsViewer {
             let visible_columns = &result.columns[start_col..end_col];
             let header_cells = visible_columns
                 .iter()
-                .map(|h| Cell::from(format!(" {} ", h)).style(
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
-                ));
+                .enumerate()
+                .map(|(idx, h)| {
+                    let col_idx = start_col + idx;
+                    let style = if col_idx == self.selected_column {
+                        // Highlight selected column header
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    };
+                    Cell::from(format!(" {} ", h)).style(style)
+                });
             let header = Row::new(header_cells)
                 .height(1)
                 .bottom_margin(0);
@@ -630,6 +664,7 @@ impl ResultsViewer {
             let data_rows = result.rows.iter().enumerate().map(|(row_idx, row)| {
                 let cells = (start_col..end_col).map(|col_idx| {
                     let cell_value = row.get(col_idx).map(String::as_str).unwrap_or("");
+                    let is_selected_column = col_idx == self.selected_column;
 
                     // Check if this is the currently editing cell
                     if self.edit_mode && row_idx == selected_row && col_idx == self.selected_column {
@@ -638,11 +673,18 @@ impl ResultsViewer {
                             .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
                     } else if let Some(modified_value) = self.modified_cells.get(&(row_idx, col_idx)) {
                         // Show modified value for edited cells with padding
-                        Cell::from(format!(" {} ", modified_value))
-                            .style(Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC))
+                        let mut style = Style::default().fg(Color::Green).add_modifier(Modifier::ITALIC);
+                        if is_selected_column && !self.edit_mode {
+                            style = style.bg(Color::Rgb(60, 60, 80));
+                        }
+                        Cell::from(format!(" {} ", modified_value)).style(style)
                     } else {
-                        // Show original value with padding
-                        Cell::from(format!(" {} ", cell_value))
+                        // Show original value with padding, highlight if selected column
+                        let mut style = Style::default();
+                        if is_selected_column && !self.edit_mode {
+                            style = style.bg(Color::Rgb(60, 60, 80));
+                        }
+                        Cell::from(format!(" {} ", cell_value)).style(style)
                     }
                 });
                 Row::new(cells).height(1)
@@ -703,6 +745,11 @@ impl ResultsViewer {
                 title.push_str("- Ctrl+D: Discard, Ctrl+S: Save ");
             }
             title.push_str("- R: Refresh");
+
+            // Add status message if present
+            if let Some(ref msg) = self.status_message {
+                title.push_str(&format!(" | {} ", msg));
+            }
 
             let table = Table::new(all_rows, widths)
                 .header(header)
